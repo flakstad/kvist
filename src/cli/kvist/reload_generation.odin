@@ -107,8 +107,8 @@ reload_app_host_source :: proc(config: Reload_App_Config, input_path, app_import
     fmt.sbprintf(&builder, "import olive_reload %q\n\n", olive_reload_import_path)
 
     strings.write_string(&builder, "App_Symbols :: struct {\n")
-    strings.write_string(&builder, "    version:  proc \"c\" () -> cstring `dynlib:\"kvist_reload_app_version\"`,\n")
-    strings.write_string(&builder, "    run:      proc \"c\" (state: rawptr, host: rawptr) `dynlib:\"olive_reload_app_run\"`,\n")
+    strings.write_string(&builder, "    :version  proc \"c\" () -> cstring `dynlib:\"kvist_reload_app_version\"`,\n")
+    strings.write_string(&builder, "    :run      proc \"c\" (state: rawptr, :host rawptr) `dynlib:\"olive_reload_app_run\"`,\n")
     strings.write_string(&builder, "    __handle:    dynlib.Library,\n")
     strings.write_string(&builder, "}\n\n")
     strings.write_string(&builder, "run :: proc(symbols: ^App_Symbols, state: ^app.")
@@ -189,8 +189,8 @@ reload_app_host_source :: proc(config: Reload_App_Config, input_path, app_import
         strings.write_string(&builder, "    case .Started:\n        fmt.printf(\"[reload] started generation=%d\\n\", event.generation)\n")
         strings.write_string(&builder, "    case .Reloaded:\n        fmt.printf(\"[reload] reloaded generation=%d\\n\", event.generation)\n")
         strings.write_string(&builder, "    case .Restarted:\n        fmt.printf(\"[reload] restarted generation=%d: %s\\n\", event.generation, event.message)\n")
-        strings.write_string(&builder, "    case .Resource_Changed:\n        fmt.printf(\"[reload] resource changed: %s\\n\", event.message)\n")
-        strings.write_string(&builder, "    case .Reload_Failed:\n        fmt.eprintf(\"[reload] reload failed: %s\\n\", event.message)\n")
+        strings.write_string(&builder, "    case .Resource_Changed:\n        fmt.printf(\"[reload] resource :changed %s\\n\", event.message)\n")
+        strings.write_string(&builder, "    case .Reload_Failed:\n        fmt.eprintf(\"[reload] reload :failed %s\\n\", event.message)\n")
         strings.write_string(&builder, "    }\n")
     }
     strings.write_string(&builder, "}\n\n")

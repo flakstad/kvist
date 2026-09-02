@@ -35,9 +35,9 @@ compile_multiline_string_literal :: proc(t: ^testing.T) {
 @(test)
 reader_supports_hash_underscore_and_comment_form :: proc(t: ^testing.T) {
     source := `(package main)
-#_(defstruct Ignored {
+#_(defstruct Ignored [
   field: string
-})
+])
 (comment
   (defn old []
     (fmt.println "old")))
@@ -205,8 +205,8 @@ reader_classifies_inline_collection_literals :: proc(t: ^testing.T) {
     defer context.allocator = old_allocator
 
     source := `(def xs [1 2 3])
-(def lookup {one: "1" two: "2"})
-(def tags #{math: lisp:})`
+(def lookup {:one "1" :two "2"})
+(def tags #{:math :lisp})`
 
     forms, err, ok := kvist.read_top_forms(source)
     testing.expect_value(t, ok, true)

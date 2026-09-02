@@ -13,8 +13,8 @@ compile_defstruct_rejects_bad_metadata :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defstruct Broken
-  {tags: [slice]
-   scores: [array int]})`
+  [tags: [slice]
+   scores: [array int]])`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -31,15 +31,15 @@ compile_defstruct_rejects_package_shaped_type_metadata :: proc(t: ^testing.T) {
         `(package main)
 
 (defstruct Broken
-  {items: [arr int]})`,
+  [items: [arr int]])`,
         `(package main)
 
 (defstruct Broken
-  {items: [fixed-arr 4 int]})`,
+  [items: [fixed-arr 4 int]])`,
         `(package main)
 
 (defstruct Broken
-  {items: [set int]})`,
+  [items: [set int]])`,
     }
     for source in sources {
         _, err, ok := kvist.compile_source(source)
@@ -417,16 +417,16 @@ compile_manages_data_assignment_places :: proc(t: ^testing.T) {
 
 (def config '{:port 8080})
 
-(defstruct Box {
+(defstruct Box [
   value: Data
-})
+])
 
 (defn make-data [] -> Data
   config)
 
 (defn replace [input: Data]
   (let [local config
-        box (Box {value: config})
+        box (Box :value config)
         values: [1]Data [config]]
     (set! local input)
     (set! box.value input)
@@ -455,25 +455,25 @@ compile_manages_data_fields_in_native_structs :: proc(t: ^testing.T) {
 
 (def config '{:port 8080})
 
-(defstruct Box {
+(defstruct Box [
   value: Data
-})
+])
 
-(defstruct Envelope {
+(defstruct Envelope [
   box: Box
   label: string
   revision: int
-})
+])
 
 (defn make-box [value: Data] -> Box
-  (Box {value: value}))
+  (Box :value value))
 
 (defn copy-box [box: Box] -> Box
   (let [copy box]
     copy))
 
 (defn wrap [box: Box] -> Envelope
-  (Envelope {box: box label: "config" revision: 1}))
+  (Envelope :box box :label "config" :revision 1))
 
 (defn with-value [box: Box, value: Data] -> Box
   (copy-with box .value value))
@@ -547,12 +547,12 @@ compile_manages_data_fields_in_native_structs :: proc(t: ^testing.T) {
 managed_data_struct_results_do_not_warn_for_automatic_cleanup :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Box {
+(defstruct Box [
   value: Data
-})
+])
 
 (defn make-box [value: Data] -> Box
-  (Box {value: value}))
+  (Box :value value))
 
 (defn use [value: Data]
   (discard (make-box value)))`
@@ -579,15 +579,15 @@ owned_data_locals_move_into_struct_fields_without_an_extra_retain :: proc(
 
 (import data "kvist:data")
 
-(defstruct Report {
+(defstruct Report [
   root: Data
   child: Data
-})
+])
 
 (defn make-report [] -> Report
   (let [root: Data {:items [1 2 3]}
         child (data.get-in root [:items])]
-    (Report {root: root child: child})))`
+    (Report :root root :child child)))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -628,9 +628,9 @@ compile_data_decode_infers_owned_string_struct_fields :: proc(t: ^testing.T) {
     source := `(package main)
 (import data "kvist:data")
 
-(defstruct Person {
+(defstruct Person [
   name: string
-})
+])
 
 (defn decode-person [value: Data] -> [person: Person, err: data.Decode-Error, ok: bool]
   (data.decode Person value))`
@@ -650,9 +650,9 @@ compile_data_decode_rejects_native_string_arrays :: proc(t: ^testing.T) {
     source := `(package main)
 (import data "kvist:data")
 
-(defstruct Names {
+(defstruct Names [
   values: [dynamic]string
-})
+])
 
 (defn decode-names [value: Data] -> [names: Names, err: data.Decode-Error, ok: bool]
   (data.decode Names value))`
@@ -673,9 +673,9 @@ compile_data_decode_diagnostic_uses_plain_type_syntax :: proc(t: ^testing.T) {
     source := `(package main)
 (import data "kvist:data")
 
-(defstruct Native-Handle {
+(defstruct Native-Handle [
   value: ^int
-})
+])
 
 (defn decode-handle [value: Data] -> [handle: Native-Handle, err: data.Decode-Error, ok: bool]
   (data.decode Native-Handle value))`
@@ -1135,7 +1135,7 @@ compile_data_decode_qualifies_support_inside_nested_source_packages :: proc(t: ^
     app_source := `(package app)
 (import helper "../helper")
 (import data "kvist:data")
-(defstruct Command { name: string })
+(defstruct Command [ name: string ])
 (defn run [] -> bool
   (let [payload: Data {:name "Ro"}
         [command err ok] (data.decode Command payload [:command])]
@@ -1173,10 +1173,10 @@ compile_exposes_explicit_data_lifetime_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 (import data "kvist:data")
 
-(defstruct Holder { value: Data })
+(defstruct Holder [ value: Data ])
 
 (defn hold [value: Data] -> Holder
-  (Holder {value: (data.retain value)}))
+  (Holder :value (data.retain value)))
 
 (defn release-holder [holder: Holder]
   (data.release holder.value))`
@@ -1321,7 +1321,7 @@ compile_runtime_data_quasiquote :: proc(t: ^testing.T) {
 compile_runtime_data_quasiquote_struct_field :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Item {id: string})
+(defstruct Item [id: string])
 
 (defn build [item: Item] -> Data
   ` + "`" + `[:db/add ~item.id :item/rank "1"])`
@@ -1341,7 +1341,7 @@ compile_runtime_data_quasiquote_struct_field :: proc(t: ^testing.T) {
 compile_runtime_data_quasiquote_loop_struct_field :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Item {id: string})
+(defstruct Item [id: string])
 
 (defn build [items: []Item]
   (for [item items]
@@ -1531,10 +1531,10 @@ compile_normalizes_managed_data_type_case_ownership :: proc(t: ^testing.T) {
 
 (def config '{:port 8080})
 
-(defunion Choice {
+(defunion Choice [
   data: Data
   number: int
-})
+])
 
 (defn select [choice: Choice] -> Data
   (let [selected: Data
@@ -1561,11 +1561,11 @@ compile_normalizes_managed_data_type_case_ownership :: proc(t: ^testing.T) {
 compile_local_struct_shadows_package_struct_metadata :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Local {name: string})
+(defstruct Local [name: string])
 
 (defn local-x [] -> int
-  (defstruct Local {x: int})
-  (let [value (Local {x: 1})]
+  (defstruct Local [x: int])
+  (let [value (Local :x 1)]
     value.x))`
 
     output, err, ok := kvist.compile_source(source)
@@ -1586,12 +1586,12 @@ compile_local_struct_shadows_package_struct_metadata :: proc(t: ^testing.T) {
 compile_cond_predicate_with_contextual_data_keeps_setup_inside_else :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Mutation {
+(defstruct Mutation [
   ok?: bool
-})
+])
 
 (defn mutation [ok?: bool] -> Mutation
-  (Mutation {ok?: ok?}))
+  (Mutation :ok? ok?))
 
 (defn transact! [tx: Data] -> bool
   true)
@@ -1623,14 +1623,14 @@ compile_cond_predicate_with_contextual_data_keeps_setup_inside_else :: proc(t: ^
 compile_let_rejects_data_destructuring_of_native_struct :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct User {
+(defstruct User [
   name: string
   age: int
-})
+])
 
 (defn main []
-  (let [user (User {name: "Ada" age: 36})
-        {name: user-name age: user-age} user
+  (let [user (User :name "Ada" :age 36)
+        {:name user-name :age user-age} user
         user-name user.name
         user-age user.age]
     (return)))`
@@ -1932,11 +1932,11 @@ decoded_struct_fields_infer_structural_cleanup :: proc(t: ^testing.T) {
     source := `(package main)
 (import data "kvist:data")
 
- (defstruct Record {
+ (defstruct Record [
   name: string
   values: [dynamic]int
   value: Data
-})
+])
 
 (defn decode-record [value: Data] -> Record
   (data.decode Record value))`
@@ -1959,16 +1959,16 @@ decoded_struct_fields_infer_structural_cleanup :: proc(t: ^testing.T) {
 native_struct_named_data_does_not_enable_shared_data_runtime :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Data {
+(defstruct Data [
   id: int
   payload: string
-})
+])
 
 (defn accept [value: Data] -> int
   value.id)
 
 (defn demo [] -> int
-  (accept (Data {id: 7 payload: "native"})))`
+  (accept (Data :id 7 :payload "native")))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)

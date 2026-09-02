@@ -63,9 +63,9 @@ compile_owned_let_branch_case_in_return_position :: proc(t: ^testing.T) {
 
 (defenum Step-Kind [One Two])
 
-(defstruct Step {
+(defstruct Step [
   kind: Step-Kind
-})
+])
 
 (defn owned-from-case [step: Step] -> [dynamic]int
   (case step.kind
@@ -98,9 +98,9 @@ compile_owned_let_branch_mixed_with_owned_call_case :: proc(t: ^testing.T) {
 
 (defenum Step-Kind [One Two])
 
-(defstruct Step {
+(defstruct Step [
   kind: Step-Kind
-})
+])
 
 (defn make-one [] -> [dynamic]int
   (let [out (make [dynamic]int)]
@@ -134,9 +134,9 @@ compile_owned_let_branch_mixed_with_owned_call_case :: proc(t: ^testing.T) {
 compile_rejects_removed_owned_struct_field_syntax :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Values {
+(defstruct Values [
   items: (owned []int)
-})`
+])`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -153,12 +153,12 @@ compile_rejects_removed_owned_struct_field_syntax :: proc(t: ^testing.T) {
 compile_local_declarations_do_not_escape_block_scope :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Local {name: string})
+(defstruct Local [name: string])
 
 (defn broken [] -> int
   (do
-    (defstruct Local {x: int}))
-  (let [value (Local {x: 1})]
+    (defstruct Local [x: int]))
+  (let [value (Local :x 1)]
     0))`
 
     _, err, ok := kvist.compile_source(source)
@@ -167,14 +167,14 @@ compile_local_declarations_do_not_escape_block_scope :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "unknown struct constructor field x:"), true)
+    testing.expect_value(t, strings.contains(err.message, "unknown struct constructor field :x"), true)
 }
 
 @(test)
 compile_core_str_constructs_one_owned_formatted_string :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Point {x: int y: int})
+(defstruct Point [x: int y: int])
 
 (defn render [path: string, point: Point] -> string
   (str "@get('" path "', {open: 100%}) " true " " 42 " " :ready " " point))
@@ -442,15 +442,15 @@ compile_threaded_let_binding_keeps_owned_intermediates_alive :: proc(t: ^testing
     source := `(package main)
 (import arr "kvist:arr")
 
-(defstruct User {
+(defstruct User [
   name: string
   active: bool
-})
+])
 
 (defn main []
-  (let [users ([]User [(User {name: "Ada" active: true})
-                           (User {name: "Lin" active: false})
-                           (User {name: "Grace" active: true})])
+  (let [users ([]User [(User :name "Ada" :active true)
+                           (User :name "Lin" :active false)
+                           (User :name "Grace" :active true)])
         active-names (->> users
                           (arr.filter .active)
                           (arr.map .name)

@@ -4,14 +4,14 @@
 (import reload "kvist:reload")
 
 (defstruct Program_State
-  {jobs-finished: int
-   last-status: string})
+  [jobs-finished: int
+   last-status: string])
 
 (defstruct App_State
-  {program: Program_State
+  [program: Program_State
    step-count: int
    reload-count: int
-   unload-count: int})
+   unload-count: int])
 
 (def Reload_State App_State)
 (def Reload_Version: string "v1")

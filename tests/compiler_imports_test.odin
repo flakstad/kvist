@@ -202,7 +202,7 @@ compile_leaves_package_dash_call_names_as_plain_calls :: proc(t: ^testing.T) {
   (map-keys m))`, "map_keys(m)"},
         {`(package main)
 
-(defn bad [a: (map int (struct {})) b: (map int (struct {}))] -> (map int (struct {}))
+(defn bad [a: (map int (struct [])) b: (map int (struct []))] -> (map int (struct []))
   (set-union a b))`, "set_union(a, b)"},
         {`(package main)
 
@@ -494,9 +494,9 @@ compile_imported_odin_struct_constructor_uses_field_type_context :: proc(t: ^tes
 (import rl "vendor:raylib")
 
 (defn make-camera [player-pos: rl.Vector2] -> rl.Camera2D
-  (rl.Camera2D {zoom: (f32 1)
-                offset: [(f32 2) (f32 3)]
-                target: player-pos}))`
+  (rl.Camera2D :zoom (f32 1)
+                :offset [(f32 2) (f32 3)]
+                :target player-pos))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -1089,39 +1089,39 @@ compile_leaves_unimported_set_helpers_unresolved :: proc(t: ^testing.T) {
     }{
         {`(package main)
 
-(defn score [s: (map int (struct {}))] -> bool
+(defn score [s: (map int (struct []))] -> bool
   (set.contains? s 1))`, "set.contains_p(s, 1)"},
         {`(package main)
 
-(defn score [lhs: (map int (struct {})), rhs: (map int (struct {}))] -> (map int (struct {}))
+(defn score [lhs: (map int (struct [])), rhs: (map int (struct []))] -> (map int (struct []))
   (set.union lhs rhs))`, "set.union(lhs, rhs)"},
         {`(package main)
 
-(defn score [lhs: (map int (struct {})), rhs: (map int (struct {}))] -> (map int (struct {}))
+(defn score [lhs: (map int (struct [])), rhs: (map int (struct []))] -> (map int (struct []))
   (set.intersection lhs rhs))`, "set.intersection(lhs, rhs)"},
         {`(package main)
 
-(defn score [lhs: (map int (struct {})), rhs: (map int (struct {}))] -> (map int (struct {}))
+(defn score [lhs: (map int (struct [])), rhs: (map int (struct []))] -> (map int (struct []))
   (set.difference lhs rhs))`, "set.difference(lhs, rhs)"},
         {`(package main)
 
-(defn score [s: (map int (struct {}))] -> (map int (struct {}))
+(defn score [s: (map int (struct []))] -> (map int (struct []))
   (set.add s 1))`, "set.add(s, 1)"},
         {`(package main)
 
-(defn score [s: (map int (struct {}))] -> (map int (struct {}))
+(defn score [s: (map int (struct []))] -> (map int (struct []))
   (set.remove s 1))`, "set.remove(s, 1)"},
         {`(package main)
 
-(defn score [lhs: (map int (struct {})), rhs: (map int (struct {}))] -> bool
+(defn score [lhs: (map int (struct [])), rhs: (map int (struct []))] -> bool
   (set.subset? lhs rhs))`, "set.subset_p(lhs, rhs)"},
         {`(package main)
 
-(defn score [lhs: (map int (struct {})), rhs: (map int (struct {}))] -> bool
+(defn score [lhs: (map int (struct [])), rhs: (map int (struct []))] -> bool
   (set.superset? lhs rhs))`, "set.superset_p(lhs, rhs)"},
         {`(package main)
 
-(defn score [lhs: (map int (struct {})), rhs: (map int (struct {}))] -> bool
+(defn score [lhs: (map int (struct [])), rhs: (map int (struct []))] -> bool
   (set.disjoint? lhs rhs))`, "set.disjoint_p(lhs, rhs)"},
         {`(package main)
 
@@ -1135,23 +1135,23 @@ compile_leaves_unimported_set_helpers_unresolved :: proc(t: ^testing.T) {
     (count s)))`, "s := set.of(int, kvist_thread_1)"},
         {`(package main)
 
-(defn score [s: (map int (struct {}))]
+(defn score [s: (map int (struct []))]
   (set.add! s 1))`, "set.add_bang(s, 1)"},
         {`(package main)
 
-(defn score [s: (map int (struct {}))]
+(defn score [s: (map int (struct []))]
   (set.remove! s 1))`, "set.remove_bang(s, 1)"},
         {`(package main)
 
-(defn score [target: (map int (struct {})), source: (map int (struct {}))]
+(defn score [target: (map int (struct [])), source: (map int (struct []))]
   (set.union! target source))`, "set.union_bang(target, source)"},
         {`(package main)
 
-(defn score [target: (map int (struct {})), source: (map int (struct {}))]
+(defn score [target: (map int (struct [])), source: (map int (struct []))]
   (set.intersection! target source))`, "set.intersection_bang(target, source)"},
         {`(package main)
 
-(defn score [target: (map int (struct {})), source: (map int (struct {}))]
+(defn score [target: (map int (struct [])), source: (map int (struct []))]
   (set.difference! target source))`, "set.difference_bang(target, source)"},
     }
 
@@ -1420,7 +1420,7 @@ compile_path_keeps_parameter_field_access_when_parameter_shadows_package_alias :
 
 (import data "../helper")
 
-(defstruct Record {has-tempid: bool})
+(defstruct Record [has-tempid: bool])
 
 (defn has-tempid? [data: Record] -> bool
   data.has-tempid)
@@ -1448,7 +1448,7 @@ compile_path_keeps_parameter_field_access_when_parameter_shadows_package_alias :
 (import sample "./sample")
 
 (defn main [] -> bool
-  (sample.has-tempid? (sample.Record {has-tempid: true})))` ) == nil, true)
+  (sample.has-tempid? (sample.Record :has-tempid true)))` ) == nil, true)
 
     output, err, ok := kvist.compile_path(main_path)
     testing.expect_value(t, ok, true)
@@ -2028,7 +2028,7 @@ compile_reload_adapter_state_alias_can_reference_imported_state :: proc(t: ^test
     app_source := `(package adapter_app)
 
 (defstruct App_State
-  {ticks: int})
+  [ticks: int])
 
 (defn init [state: ^App_State]
   (set! state^.ticks 0))
@@ -2114,7 +2114,7 @@ compile_output_rebases_absolute_odin_imports_for_output_path :: proc(t: ^testing
 (import reload "kvist:reload")
 
 (defstruct App_State
-  {requests: int})
+  [requests: int])
 
 (def Reload_State App_State)
 
@@ -2186,7 +2186,7 @@ compile_output_rebased_for_tmp_path_uses_canonical_relative_import :: proc(t: ^t
 (import reload "kvist:reload")
 
 (defstruct App_State
-  {requests: int})
+  [requests: int])
 
 (def Reload_State App_State)
 
@@ -2777,9 +2777,9 @@ compile_leaves_unimported_official_package_helpers_unresolved :: proc(t: ^testin
   (io.write path data))`, "io.write(path, data)"},
         {`(package main)
 
-(defstruct User {
+(defstruct User [
   name: string
-})
+])
 
 (defn save-user [path: string, user: User]
   (let [[marshal-err write-err] (json.write path user)]

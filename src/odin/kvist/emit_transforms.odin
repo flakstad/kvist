@@ -94,7 +94,7 @@ transform_loop_source :: proc(e: ^Emitter, form: CST_Form) -> (spec: Transform_L
     if !form_is_transform_loop_call(form) {
         return spec, {}, false
     }
-    if len(form.items) != 4 {
+    if len(form.items) < 4 {
         return spec, Compile_Error{message = "transform-loop expects bindings, item type, and item expression", span = form.span}, false
     }
     bindings := form.items[1]
@@ -134,9 +134,23 @@ transform_loop_source :: proc(e: ^Emitter, form: CST_Form) -> (spec: Transform_L
     binding_types := []string{key_ty, value_ty}
     item_ty := substitute_type_names(item_ty_template, binding_names, binding_types)
     defer delete(item_ty)
-    item_text, err_item, ok_item := emit_expr_for_expected_type(e, form.items[3], item_ty)
-    if !ok_item {
-        return spec, err_item, false
+    item_text := ""
+    item_args := form.items[3:]
+    if len(item_args) == 1 {
+        item_value, err_item, ok_item := emit_expr_for_expected_type(e, item_args[0], item_ty)
+        if !ok_item {
+            return spec, err_item, false
+        }
+        item_text = item_value
+    } else if keyword_arg_tail_is_syntax(item_args, 0) {
+        item_fields, err_fields, ok_fields := emit_named_call_arg_texts(e, item_args, form.span)
+        if !ok_fields {
+            return spec, err_fields, false
+        }
+        item_inner := emit_vector_items_text(item_fields[:])
+        item_text = surround_with_braces(item_ty, item_inner)
+    } else {
+        return spec, Compile_Error{message = "transform-loop item construction uses one expression or alternating :field value pairs", span = form.span}, false
     }
     spec.source_text = source_text
     spec.source_ty = source_ty

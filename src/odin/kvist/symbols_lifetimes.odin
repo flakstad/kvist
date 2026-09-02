@@ -36,10 +36,10 @@ symbols_proc_lifetime_detail :: proc(decl: ^Proc_Decl) -> string {
     }
     for param, idx in decl.params {
         explicit_consumption :=
-            body_deletes_or_returns_name(decl.body[:], param.name, false)
+            body_deletes_or_returns_name(nil, decl.body[:], param.name, false)
         transferred_result :=
             owned_result &&
-            body_deletes_or_returns_name(decl.body[:], param.name, true)
+            body_deletes_or_returns_name(nil, decl.body[:], param.name, true)
         if param.ownership != .Owned &&
            !explicit_consumption &&
            !transferred_result {

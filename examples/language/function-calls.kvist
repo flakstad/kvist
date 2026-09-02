@@ -2,40 +2,40 @@
 (package main)
 (import fmt "core:fmt")
 
-(defn greet [name: string, punctuation: string = "!"] -> string
+(defn greet [name: string, punctuation: string :default "!"] -> string
   (fmt.tprintf "hello %s%s" name punctuation))
 
-(defn rect-area [width: int, height: int = 10] -> int
+(defn rect-area [width: int, height: int :default 10] -> int
   (* width height))
 
-(defn place [name: string, x: int, y: int, label: string = "ok"] -> string
+(defn place [name: string, x: int, y: int, label: string :default "ok"] -> string
   (fmt.tprintf "%s:%d,%d/%s" name x y label))
 
 (defn main []
   (println (greet "Ada"))
-  (println (greet {name: "Linus" punctuation: "?"}))
+  (println (greet :name "Linus" :punctuation "?"))
   (println (rect-area 4))
-  (println (rect-area {height: 12 width: 3}))
-  (println (place "enemy" {x: 10 y: 20})))
+  (println (rect-area :height 12 :width 3))
+  (println (place "enemy" :x 10 :y 20)))
 
 (comment
 
   ;; Positional arguments stay positional.
   (greet "Ada" "!")
 
-  ;; A single field-label brace form lowers to named arguments.
-  (greet {name: "Linus" punctuation: "?"})
+  ;; Alternating keyword/value pairs are named arguments.
+  (greet :name "Linus" :punctuation "?")
 
   ;; Trailing default arguments can be omitted positionally.
   (rect-area 4)
   ;; => 40
 
   ;; Named calls can omit any parameter with a default.
-  (greet {name: "Grace"})
+  (greet :name "Grace")
   ;; => "hello Grace!"
 
   ;; Mixed calls keep the required prefix positional and name the optional tail.
-  (place "enemy" {x: 10 y: 20})
+  (place "enemy" :x 10 :y 20)
   ;; => "enemy:10,20/ok"
 
 )

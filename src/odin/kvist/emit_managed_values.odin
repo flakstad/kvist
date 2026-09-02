@@ -658,9 +658,12 @@ form_produces_owned_managed_type :: proc(
     }
     head_name := map_name(form.items[0].text)
     defer delete(head_name)
-    if head_name == ty &&
-       len(form.items) == 2 &&
-       form.items[1].kind == .Brace {
+    if head_name == ty {
+        if _, ok_struct := find_struct_decl(e, head_name); ok_struct {
+            return true
+        }
+    }
+    if head_name == ty && form_is_struct_or_union_constructor(e, form) {
         return true
     }
     if form.items[0].text == "copy-with" || form.items[0].text == "copy-update" {

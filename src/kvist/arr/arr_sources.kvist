@@ -1,10 +1,10 @@
 (package arr)
 
-(defstruct- Range_Source {
+(defstruct- Range_Source [
   current: int
   end: int
   step: int
-})
+])
 
 (defn- range-next [src: ^Range_Source] -> [value: int ok: bool]
   (when (= src.step 0)
@@ -18,7 +18,7 @@
 
 (defiter- range-impl [start: int, end: int, step: int] -> Range_Source :yield int
   :next range-next
-  (Range_Source {current: start end: end step: step}))
+  (Range_Source :current start :end end :step step))
 
 (defn- map-impl
   "Implementation helper for non-field-selector `arr.map`.
@@ -97,7 +97,7 @@
 
 (defiter- take-nth-impl [n: int, xs: []$T] -> (arr__Take_Nth_Source T) :yield T
   :next take-nth-next
-  ((arr__Take_Nth_Source T) {step: n xs: xs index: 0}))
+  ((arr__Take_Nth_Source T) :step n :xs xs :index 0))
 
 (defmacro repeat
   "Return a dynamic array containing `value` repeated `n` times.
@@ -118,7 +118,7 @@
 
 (defiter- repeat-impl [n: int, value: $T] -> (arr__Repeat_Source T) :yield T
   :next repeat-next
-  ((arr__Repeat_Source T) {value: value index: 0 count: n}))
+  ((arr__Repeat_Source T) :value value :index 0 :count n))
 
 (defmacro repeatedly
   "Call `f` `n` times and return the produced values in a dynamic array.
@@ -139,7 +139,7 @@
 
 (defiter- repeatedly-impl [n: int, f: (fn [] -> $T)] -> (arr__Repeatedly_Source T) :yield T
   :next repeatedly-next
-  ((arr__Repeatedly_Source T) {f: f index: 0 count: n}))
+  ((arr__Repeatedly_Source T) :f f :index 0 :count n))
 
 (defmacro iterate
   "Return `n` successive values by repeatedly applying `f`.
@@ -161,7 +161,7 @@
 
 (defiter- iterate-impl [n: int, f: (fn [x: $T] -> T), init: T] -> (arr__Iterate_Source T) :yield T
   :next iterate-next
-  ((arr__Iterate_Source T) {f: f current: init index: 0 count: n}))
+  ((arr__Iterate_Source T) :f f :current init :index 0 :count n))
 
 (defmacro cycle
   "Return `n` values by repeating the contents of `xs`.
@@ -183,7 +183,7 @@
 
 (defiter- cycle-impl [n: int, xs: []$T] -> (arr__Cycle_Source T) :yield T
   :next cycle-next
-  ((arr__Cycle_Source T) {xs: xs index: 0 count: n size: (core.count xs)}))
+  ((arr__Cycle_Source T) :xs xs :index 0 :count n :size (core.count xs)))
 
 (defmacro take-while
   "Return the longest leading slice whose elements satisfy `pred`.

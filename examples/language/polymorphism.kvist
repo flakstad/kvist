@@ -4,10 +4,10 @@
 (import fmt "core:fmt")
 (import intrinsics "base:intrinsics")
 
-(defstruct User {
+(defstruct User [
   name: string
   age: int
-})
+])
 
 (defn debug-str
   "Return an owned debug string using generic formatting."
@@ -33,7 +33,7 @@
   (render value))
 
 (defn main []
-  (let [user (User {name: "Ada" age: 36})
+  (let [user (User :name "Ada" :age 36)
         described (debug-str user) :defer
         rendered-user (render-supported user) :defer
         rendered-int (render-supported 7) :defer]

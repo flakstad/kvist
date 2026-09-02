@@ -129,24 +129,63 @@ owned_locals_apply_definite_moves :: proc(live: ^[dynamic]Owned_Local, definite_
     }
 }
 
-brace_directly_contains_owned_name :: proc(form: CST_Form, name: string) -> bool {
-    if form.kind != .Brace || len(form.items)%2 != 0 {
+form_is_struct_or_union_constructor :: proc(e: ^Emitter, form: CST_Form) -> bool {
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
         return false
     }
-    for i := 1; i < len(form.items); i += 2 {
-        value := form.items[i]
-        if value.kind == .Symbol && map_name(value.text) == name {
+
+    head_name := map_name(form.items[0].text)
+    defer delete(head_name)
+    if e != nil {
+        if _, ok_struct := find_struct_decl(e, head_name); ok_struct {
+            return true
+        }
+        if _, ok_union := find_union_decl(e, head_name); ok_union {
+            return true
+        }
+    }
+
+    return (len(head_name) > 0 && head_name[0] >= 'A' && head_name[0] <= 'Z') ||
+           dotted_head_member_starts_upper(head_name)
+}
+
+composite_value_transfers_owned_name :: proc(e: ^Emitter, form: CST_Form, name: string) -> bool {
+    if form.kind == .Symbol {
+        return map_name(form.text) == name
+    }
+    if form.kind == .Vector || form.kind == .Set {
+        for item in form.items {
+            if composite_value_transfers_owned_name(e, item, name) {
+                return true
+            }
+        }
+        return false
+    }
+    return composite_literal_transfers_owned_name(e, form, name)
+}
+
+composite_literal_transfers_owned_name :: proc(e: ^Emitter, form: CST_Form, name: string) -> bool {
+    if !form_is_struct_or_union_constructor(e, form) {
+        return false
+    }
+    args := form.items[1:]
+    if len(args) == 1 && args[0].kind == .Vector {
+        return composite_value_transfers_owned_name(e, args[0], name)
+    }
+    if keyword_arg_tail_is_syntax(args, 0) {
+        for i := 1; i < len(args); i += 2 {
+            if composite_value_transfers_owned_name(e, args[i], name) {
+                return true
+            }
+        }
+        return false
+    }
+    for arg in args {
+        if composite_value_transfers_owned_name(e, arg, name) {
             return true
         }
     }
     return false
-}
-
-composite_literal_transfers_owned_name :: proc(form: CST_Form, name: string) -> bool {
-    return form.kind == .List &&
-           len(form.items) == 2 &&
-           form.items[0].kind == .Symbol &&
-           brace_directly_contains_owned_name(form.items[1], name)
 }
 
 form_head_symbol_text :: proc(form: CST_Form) -> (string, bool) {
@@ -368,8 +407,24 @@ borrowed_escape_owner_name :: proc(e: ^Emitter, form: CST_Form, borrowed: []Borr
             }
         }
     }
-    if form.kind == .List && len(form.items) == 2 && form.items[1].kind == .Brace {
-        return borrowed_escape_owner_name(e, form.items[1], borrowed, live)
+    if form_is_struct_or_union_constructor(e, form) {
+        args := form.items[1:]
+        if len(args) == 1 && args[0].kind == .Vector {
+            return borrowed_escape_owner_name(e, args[0], borrowed, live)
+        }
+        if keyword_arg_tail_is_syntax(args, 0) {
+            for i := 1; i < len(args); i += 2 {
+                if owner, ok := borrowed_escape_owner_name(e, args[i], borrowed, live); ok {
+                    return owner, true
+                }
+            }
+            return "", false
+        }
+        for arg in args {
+            if owner, ok := borrowed_escape_owner_name(e, arg, borrowed, live); ok {
+                return owner, true
+            }
+        }
     }
     return "", false
 }
@@ -392,7 +447,7 @@ form_transfers_owned_args :: proc(form: CST_Form) -> bool {
     return false
 }
 
-proc_decl_transfers_param_in_result :: proc(proc_decl: ^Proc_Decl, param_index: int) -> bool {
+proc_decl_transfers_param_in_result :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, param_index: int) -> bool {
     if proc_decl == nil ||
        param_index < 0 ||
        param_index >= len(proc_decl.params) ||
@@ -401,7 +456,7 @@ proc_decl_transfers_param_in_result :: proc(proc_decl: ^Proc_Decl, param_index: 
     }
     name := map_name(proc_decl.params[param_index].name)
     defer delete(name)
-    return form_transfers_owned_name(proc_decl.body[len(proc_decl.body)-1], name, true)
+    return form_transfers_owned_name(e, proc_decl.body[len(proc_decl.body)-1], name, true)
 }
 
 call_arg_transfers_owned_result :: proc(e: ^Emitter, form: CST_Form, arg_index: int) -> bool {
@@ -420,7 +475,7 @@ call_arg_transfers_owned_result :: proc(e: ^Emitter, form: CST_Form, arg_index: 
            proc_decl.params[arg_index-1].ownership == .Owned {
             return true
         }
-        return proc_decl_transfers_param_in_result(proc_decl, arg_index-1)
+        return proc_decl_transfers_param_in_result(e, proc_decl, arg_index-1)
     }
     overload_decl, ok_overload := find_overload_decl(e, name)
     if !ok_overload {
@@ -437,7 +492,7 @@ call_arg_transfers_owned_result :: proc(e: ^Emitter, form: CST_Form, arg_index: 
         }
         applicable += 1
         if member_decl.params[param_index].ownership != .Owned &&
-           !proc_decl_transfers_param_in_result(member_decl, param_index) {
+           !proc_decl_transfers_param_in_result(e, member_decl, param_index) {
             return false
         }
     }
@@ -569,6 +624,7 @@ binding_declares_mapped_name :: proc(binding: Binding, name: string) -> bool {
 }
 
 let_scope_transfers_owned_name :: proc(
+    e: ^Emitter,
     bindings: []Binding,
     body: []CST_Form,
     name: string,
@@ -579,17 +635,17 @@ let_scope_transfers_owned_name :: proc(
         // explicit delete or return here still refers to the outer binding.
         // A bare final symbol only moves into the new local and is not, by
         // itself, proof that the value is eventually cleaned up.
-        if form_transfers_owned_name(binding.value, name, false) {
+        if form_transfers_owned_name(e, binding.value, name, false) {
             return true
         }
         if binding_declares_mapped_name(binding, name) {
             return false
         }
     }
-    return body_deletes_or_returns_name(body, name, can_transfer_final)
+    return body_deletes_or_returns_name(e, body, name, can_transfer_final)
 }
 
-type_case_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_final: bool) -> bool {
+type_case_transfers_owned_name :: proc(e: ^Emitter, form: CST_Form, name: string, can_transfer_final: bool) -> bool {
     if len(form.items) < 5 || len(form.items)%2 == 0 {
         return false
     }
@@ -599,18 +655,19 @@ type_case_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfe
         if !ok_pattern || (!ignored && binding == name) {
             return false
         }
-        if !form_transfers_owned_name(form.items[i+1], name, can_transfer_final) {
+        if !form_transfers_owned_name(e, form.items[i+1], name, can_transfer_final) {
             return false
         }
     }
     return form_transfers_owned_name(
+        e,
         form.items[len(form.items)-1],
         name,
         can_transfer_final,
     )
 }
 
-form_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_final: bool) -> bool {
+form_transfers_owned_name :: proc(e: ^Emitter, form: CST_Form, name: string, can_transfer_final: bool) -> bool {
     if form_is_delete_of_name(form, name) {
         return true
     }
@@ -621,7 +678,7 @@ form_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_fin
             if item.kind == .Symbol && map_name(item.text) == name {
                 return true
             }
-            if composite_literal_transfers_owned_name(item, name) {
+            if composite_literal_transfers_owned_name(e, item, name) {
                 return true
             }
         }
@@ -642,6 +699,7 @@ form_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_fin
         }
         defer delete(bindings)
         return let_scope_transfers_owned_name(
+            e,
             bindings[:],
             form.items[2:],
             name,
@@ -650,19 +708,19 @@ form_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_fin
     }
 
     if ok && head == "do" && len(form.items) >= 2 {
-        return body_deletes_or_returns_name(form.items[1:], name, can_transfer_final)
+        return body_deletes_or_returns_name(e, form.items[1:], name, can_transfer_final)
     }
 
     if ok && head == "if" {
         if len(form.items) < 4 {
             return false
         }
-        return form_transfers_owned_name(form.items[2], name, can_transfer_final) &&
-            form_transfers_owned_name(form.items[3], name, can_transfer_final)
+        return form_transfers_owned_name(e, form.items[2], name, can_transfer_final) &&
+            form_transfers_owned_name(e, form.items[3], name, can_transfer_final)
     }
 
     if ok && head == "type-case" {
-        return type_case_transfers_owned_name(form, name, can_transfer_final)
+        return type_case_transfers_owned_name(e, form, name, can_transfer_final)
     }
 
     if ok && head == "match" {
@@ -677,7 +735,7 @@ form_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_fin
             if !ok_pattern || shadows_name {
                 return false
             }
-            if !form_transfers_owned_name(form.items[i+1], name, can_transfer_final) {
+            if !form_transfers_owned_name(e, form.items[i+1], name, can_transfer_final) {
                 return false
             }
         }
@@ -688,16 +746,16 @@ form_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_fin
         return true
     }
 
-    if can_transfer_final && composite_literal_transfers_owned_name(form, name) {
+    if can_transfer_final && composite_literal_transfers_owned_name(e, form, name) {
         return true
     }
 
     return false
 }
 
-body_deletes_or_returns_name :: proc(forms: []CST_Form, name: string, can_transfer_final: bool) -> bool {
+body_deletes_or_returns_name :: proc(e: ^Emitter, forms: []CST_Form, name: string, can_transfer_final: bool) -> bool {
     for form, idx in forms {
-        if form_transfers_owned_name(form, name, can_transfer_final && idx == len(forms)-1) {
+        if form_transfers_owned_name(e, form, name, can_transfer_final && idx == len(forms)-1) {
             return true
         }
     }
@@ -803,10 +861,10 @@ infer_proc_lifetime_facts :: proc(e: ^Emitter) {
                     continue
                 }
                 explicit_consumption :=
-                    body_deletes_or_returns_name(proc_decl.body[:], param.name, false)
+                    body_deletes_or_returns_name(e, proc_decl.body[:], param.name, false)
                 transferred_result :=
                     proc_decl.owns_result &&
-                    body_deletes_or_returns_name(proc_decl.body[:], param.name, true)
+                    body_deletes_or_returns_name(e, proc_decl.body[:], param.name, true)
                 if explicit_consumption || transferred_result {
                     param.ownership = .Owned
                     changed = true
@@ -918,7 +976,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
         if final_in_scope && can_transfer_final {
             warn_if_borrowed_escape(e, form, borrowed[:], live[:])
             for i := len(live[:]) - 1; i >= 0; i -= 1 {
-                if live[i].state == .Live && composite_literal_transfers_owned_name(form, live[i].name) {
+                if live[i].state == .Live && composite_literal_transfers_owned_name(e, form, live[i].name) {
                     _ = owned_locals_mark_moved_last(live, live[i].name)
                 }
             }
@@ -941,7 +999,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                     continue
                 }
                 for i := len(live[:]) - 1; i >= 0; i -= 1 {
-                    if live[i].state == .Live && composite_literal_transfers_owned_name(item, live[i].name) {
+                    if live[i].state == .Live && composite_literal_transfers_owned_name(e, item, live[i].name) {
                         _ = owned_locals_mark_moved_last(live, live[i].name)
                     }
                 }
@@ -1018,7 +1076,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                 warn_use_after_transfer_form(e, binding.value, live[:])
                 for i := len(live[:]) - 1; i >= 0; i -= 1 {
                     if live[i].state == .Live && !live[i].cleanup_scheduled &&
-                       composite_literal_transfers_owned_name(binding.value, live[i].name) {
+                       composite_literal_transfers_owned_name(e, binding.value, live[i].name) {
                         _ = owned_locals_mark_moved_last(live, live[i].name)
                     }
                 }
@@ -1063,7 +1121,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                         break
                     }
                 }
-                if !skip_warning && !body_deletes_or_returns_name(form.items[2:], live[i].name, final_in_scope && can_transfer_final) {
+                if !skip_warning && !body_deletes_or_returns_name(e, form.items[2:], live[i].name, final_in_scope && can_transfer_final) {
                     emit_coded_warning(
                         e,
                         fmt.tprintf("owned local %s is never deleted or returned; add (defer (delete %s)) or return it", live[i].name, live[i].name),

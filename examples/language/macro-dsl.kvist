@@ -5,9 +5,9 @@
     (forms
       `(defstruct ~name ~fields)
       `(defn ~make-name [] -> ~name
-         (~name {})))))
+         (~name [])))))
 
-(defentity Point {x: float y: float})
+(defentity Point [x: float y: float])
 
 (defn point-origin? [point: Point] -> bool
   (and (= point.x 0.0)

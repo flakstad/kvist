@@ -5,12 +5,12 @@
   [Idle Run])
 
 (defstruct Animation
-  {texture: rl.Texture2D
+  [texture: rl.Texture2D
    num-frames: int
    frame-timer: f32
    current-frame: int
    frame-length: f32
-   name: Animation-Name})
+   name: Animation-Name])
 
 (defn update-animation [a: ^Animation]
   (mut! a.frame-timer += (rl.GetFrameTime))
@@ -26,16 +26,16 @@
    flip: bool]
   (let [width (f32 a.texture.width)
         height (f32 a.texture.height)
-        source (rl.Rectangle {x: (/
+        source (rl.Rectangle :x (/
                                   (* (f32 a.current-frame) width)
                                   (f32 a.num-frames))
-                              y: 0
-                              width: (/ width (f32 a.num-frames))
-                              height: height})
-        dest (rl.Rectangle {x: pos.x
-                            y: pos.y
-                            width: (/ width (f32 a.num-frames))
-                            height: height})]
+                              :y 0
+                              :width (/ width (f32 a.num-frames))
+                              :height height)
+        dest (rl.Rectangle :x pos.x
+                            :y pos.y
+                            :width (/ width (f32 a.num-frames))
+                            :height height)]
     (when flip (set! source.width (- source.width)))
     (rl.DrawTexturePro
       a.texture
@@ -52,7 +52,7 @@
 (def PlatformWidth: f32 96)
 (def PlatformHeight: f32 16)
 
-(defstruct Level {platforms: [dynamic]rl.Vector2})
+(defstruct Level [platforms: [dynamic]rl.Vector2])
 
 (defn platform-collider [pos: rl.Vector2] -> rl.Rectangle
   (rl.Rectangle [pos.x pos.y PlatformWidth PlatformHeight]))
@@ -70,16 +70,16 @@
         player-vel (rl.Vector2 [0 0])
         player-grounded? false
         player-flip? false
-        player-run (Animation {texture: (rl.LoadTexture "eva.png")
-                               num-frames: 3
-                               frame-length: 0.1
-                               name: .Run})
-        player-idle (Animation {texture: (rl.LoadTexture "eva.png")
-                                num-frames: 3
-                                frame-length: 0.5
-                                name: .Idle})
+        player-run (Animation :texture (rl.LoadTexture "eva.png")
+                               :num-frames 3
+                               :frame-length 0.1
+                               :name .Run)
+        player-idle (Animation :texture (rl.LoadTexture "eva.png")
+                                :num-frames 3
+                                :frame-length 0.5
+                                :name .Idle)
         current-anim player-idle
-        level (Level {platforms: [(rl.Vector2 [-20 20])]})
+        level (Level :platforms [(rl.Vector2 [-20 20])])
         platform-texture (rl.LoadTexture "platform.png")]
 
     ;; load level from disk?
@@ -134,10 +134,10 @@
       (update-animation &current-anim)
 
       (defvar screen-height (f32 (rl.GetScreenHeight)))
-      (defvar camera (rl.Camera2D {zoom: (/ screen-height PixelWindowHeight)
-                                offset: [(f32 (/ (rl.GetScreenWidth) 2))
+      (defvar camera (rl.Camera2D :zoom (/ screen-height PixelWindowHeight)
+                                :offset [(f32 (/ (rl.GetScreenWidth) 2))
                                          (f32 (/ screen-height 2))]
-                                target: player-pos}))
+                                :target player-pos))
 
       (rl.BeginMode2D camera)
       (draw-animation current-anim player-pos player-flip?)

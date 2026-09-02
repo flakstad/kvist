@@ -9,10 +9,10 @@
 (import str "kvist:str")
 (import soa "kvist:soa")
 
-(defstruct Profile {
+(defstruct Profile [
   name: string
   age: int
-})
+])
 
 (defn inc-value [x: int] -> int
   (+ x 1))
@@ -28,7 +28,7 @@
         empty-xs (arr.dynamic int []) :defer
         lookup (map.of string int {"a" 1}) :defer
         mutable ([dynamic]int [1 2 3]) :defer
-        profile (Profile {name: "Ada" age: 10})
+        profile (Profile :name "Ada" :age 10)
         updated-profile profile
         missing (or-else (query-missing) 9)]
     (set! mutable[0] 7)

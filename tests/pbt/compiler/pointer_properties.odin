@@ -141,8 +141,8 @@ write_compiler_pointer_expression :: proc(
 		stats.struct_pointer += 1
 		x := pbt.draw(t, pbt.int_range(-5, 5))
 		y := pbt.draw(t, pbt.int_range(-5, 5))
-		strings.write_string(builder, "(let [point (Pbt-Point {x: ")
-		fmt.sbprintf(builder, "%d y: %d weight: %d active?: false}) pointer (addr point)] (+ (* pointer^.x 31) (* pointer^.y 17) pointer^.weight))", x, y, value)
+		strings.write_string(builder, "(let [point (Pbt-Point :x ")
+		fmt.sbprintf(builder, "%d :y %d :weight %d :active? false) pointer (addr point)] (+ (* pointer^.x 31) (* pointer^.y 17) pointer^.weight))", x, y, value)
 		return x * 31 + y * 17 + value
 	case 7:
 		stats.address_form += 1
@@ -152,8 +152,8 @@ write_compiler_pointer_expression :: proc(
 		x := pbt.draw(t, pbt.int_range(-5, 5))
 		y := pbt.draw(t, pbt.int_range(-5, 5))
 		replacement := pbt.draw(t, pbt.int_range(-5, 5))
-		strings.write_string(builder, "(let [point (Pbt-Point {x: ")
-		fmt.sbprintf(builder, "%d y: %d weight: 0 active?: false}) pointer (addr point)] (set! pointer^.y %d) (+ (* point.x 31) point.y))", x, y, replacement)
+		strings.write_string(builder, "(let [point (Pbt-Point :x ")
+		fmt.sbprintf(builder, "%d :y %d :weight 0 :active? false) pointer (addr point)] (set! pointer^.y %d) (+ (* point.x 31) point.y))", x, y, replacement)
 		return x * 31 + replacement
 	case 8:
 		stats.address_form += 1
@@ -162,8 +162,8 @@ write_compiler_pointer_expression :: proc(
 		stats.function_boundary += 1
 		x := pbt.draw(t, pbt.int_range(-5, 5))
 		delta := pbt.draw(t, pbt.int_range(-5, 5))
-		strings.write_string(builder, "(let [point (Pbt-Point {x: ")
-		fmt.sbprintf(builder, "%d y: %d weight: 0 active?: false}) result (pbt-add-through-pointer! (addr point.x) %d)] (+ (* point.x 31) result))", x, value, delta)
+		strings.write_string(builder, "(let [point (Pbt-Point :x ")
+		fmt.sbprintf(builder, "%d :y %d :weight 0 :active? false) result (pbt-add-through-pointer! (addr point.x) %d)] (+ (* point.x 31) result))", x, value, delta)
 		updated := x + delta
 		return updated * 32
 	case 9:

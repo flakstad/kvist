@@ -16,9 +16,9 @@ language_entry_signature :: proc(entry: Language_Source_Entry) -> string {
     case "foreign-import": return "(foreign-import alias \"library\")"
     case "def", "def-": return "(def name: Type value)"
     case "defvar", "defvar-": return "(defvar name: Type value?)"
-    case "defstruct", "defstruct-": return "(defstruct Name {field: Type ...})"
+    case "defstruct", "defstruct-": return "(defstruct Name [field: Type ...])"
     case "defenum", "defenum-": return "(defenum Name [Member ...])"
-    case "defunion", "defunion-": return "(defunion Name {variant: Type ...})"
+    case "defunion", "defunion-": return "(defunion Name [variant: Type ...])"
     case "defn", "defn-": return "(defn name docstring? [params ...] -> Return body ...)"
     case "defmacro", "defmacro-": return "(defmacro name docstring? [params ...] body ...)"
     case "deftransform", "deftransform-": return "(deftransform name transform)"
@@ -43,6 +43,7 @@ language_entry_signature :: proc(entry: Language_Source_Entry) -> string {
     case "alloc": return "(alloc Type allocator?)"
     case "delete": return "(delete owned-value)"
     case "zero": return "(zero Type)"
+    case "zero-of": return "(zero-of value)"
     case "overload": return "(overload function ...)"
     case "where": return "(where compile-time-condition)"
     case "type": return "(type value)"
@@ -77,11 +78,11 @@ language_entry_doc :: proc(entry: Language_Source_Entry) -> string {
     case "defvar", "defvar-":
         return "Define mutable package state. A top-level defvar is exported; defvar- is package-private. Use set!, mut!, or the unary mutation forms to update it.\n\nExample:\n  (defvar requests: int 0)"
     case "defstruct", "defstruct-":
-        return "Define a nominal struct with named fields. defstruct- keeps the type private to its source package. Construct values with type-call syntax.\n\nExample:\n  (defstruct User {name: string age: int})\n  (User {name: \"Ada\" age: 36})"
+        return "Define a nominal struct with typed fields in declaration order. defstruct- keeps the type private to its source package. Construct values positionally, with order-independent keyword/value pairs, or with one positional vector.\n\nExample:\n  (defstruct User [name: string age: int])\n  (User :age 36 :name \"Ada\")"
     case "defenum", "defenum-":
-        return "Define a nominal enum. Members may be listed in a vector or assigned explicit values in braces; defenum- is package-private.\n\nExample:\n  (defenum Status [Ready Running Done])"
+        return "Define a nominal enum. Members may be listed in a vector or assigned explicit values in a keyword map; defenum- is package-private.\n\nExample:\n  (defenum Status [Ready Running Done])"
     case "defunion", "defunion-":
-        return "Define a tagged union of named payload alternatives. defunion- keeps it package-private; use case to inspect the active payload.\n\nExample:\n  (defunion Value {number: int text: string})"
+        return "Define a tagged union of typed payload alternatives. defunion- keeps it package-private; use case to inspect the active payload.\n\nExample:\n  (defunion Value [number: int text: string])"
     case "defn", "defn-":
         return "Define a native, eagerly compiled procedure. Parameters and return values use Odin types; an optional docstring follows the name. defn- is package-private. Re-evaluating a compatible defn updates its live REPL slot.\n\nExample:\n  (defn square \"Return x squared.\" [x: int] -> int\n    (* x x))"
     case "defmacro", "defmacro-":
@@ -110,6 +111,7 @@ language_entry_doc :: proc(entry: Language_Source_Entry) -> string {
     case "alloc": return "Allocate one zero-initialized value of Type and return a pointer, using the current allocator unless another allocator is supplied.\n\nExample:\n  (alloc Node context.temp_allocator)"
     case "delete": return "Release storage owned by a pointer, dynamic array, map, slice allocation, or other Odin delete-compatible value. Do not use the value afterward.\n\nExample:\n  (defer (delete xs))"
     case "zero": return "Construct the zero value of an explicitly named type without allocating.\n\nExample:\n  (zero [2]f32)"
+    case "zero-of": return "Construct the zero value of the operand's inferred type without evaluating the operand.\n\nExample:\n  (zero-of err)"
     case "overload": return "Construct an Odin procedure overload set from compatible function declarations; bind it with def or a local def.\n\nExample:\n  (def render (overload render-int render-user))"
     case "where": return "Constrain a polymorphic defn with a compile-time boolean predicate, following the parameter vector.\n\nExample:\n  (where (intrinsics.type-is-comparable T))"
     case "type": return "Return a comparable descriptor for the type of a value, function, type name, or Data runtime kind.\n\nExample:\n  (type 42) ; => int"

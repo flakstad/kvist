@@ -100,6 +100,7 @@ LANGUAGE_SOURCE_ENTRIES :: []Language_Source_Entry{
     {name = "alloc", kind = "kvist form", relative = "src/odin/kvist/emit.odin", snippet = "if head.text == \"alloc\""},
     {name = "delete", kind = "kvist form", relative = "src/odin/kvist/emit.odin", snippet = "if head == \"delete\""},
     {name = "zero", kind = "kvist form", relative = "src/odin/kvist/emit.odin", snippet = "if head.text == \"zero\""},
+    {name = "zero-of", kind = "kvist form", relative = "src/odin/kvist/emit.odin", snippet = "if head.text == \"zero-of\""},
     {name = "overload", kind = "kvist form", relative = "src/odin/kvist/parse.odin", snippet = "form.items[0].text == \"overload\""},
     {name = "where", kind = "kvist form", relative = "src/odin/kvist/parse.odin", snippet = "is_symbol(form.items[body_index].items[0], \"where\")"},
     {name = "type", kind = "kvist form", relative = "src/odin/kvist/emit.odin", snippet = "emit_runtime_type_expr :: proc"},

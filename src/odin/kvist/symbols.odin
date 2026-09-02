@@ -77,7 +77,7 @@ symbols_struct_signature :: proc(name: string, fields: []Struct_Field) -> string
 
     strings.write_string(&builder, "(")
     strings.write_string(&builder, name)
-    strings.write_string(&builder, " {")
+    strings.write_string(&builder, " [")
     for field, idx in fields {
         if idx > 0 {
             strings.write_string(&builder, " ")
@@ -96,7 +96,7 @@ symbols_struct_signature :: proc(name: string, fields: []Struct_Field) -> string
             delete(default_text)
         }
     }
-    strings.write_string(&builder, "})")
+    strings.write_string(&builder, "])")
     return strings.to_string(builder)
 }
 
@@ -126,23 +126,23 @@ symbols_append_doc_lines :: proc(base, extra: []string) -> (lines: [dynamic]stri
 }
 
 symbols_write_fields :: proc(builder: ^strings.Builder, source, parent: string, fields: CST_Form) {
-    if fields.kind != .Brace {
+    if fields.kind != .Vector {
         return
     }
     i := 0
     for i < len(fields.items) {
-        if i+1 >= len(fields.items) {
+        key := fields.items[i]
+        _, source_name, type_start, ok_typed := typed_name_parts(fields.items[:], i)
+        if !ok_typed || type_start >= len(fields.items) {
             return
         }
-        key := fields.items[i]
-        if key.kind == .Keyword && len(key.text) > 1 {
-            name := fmt.tprintf("%s.%s", parent, key.text[1:])
-            symbols_write_record(builder, "field", name, source, key.span, parent)
-        } else if key.kind == .Symbol && len(key.text) > 1 && key.text[len(key.text)-1] == ':' {
-            name := fmt.tprintf("%s.%s", parent, key.text[:len(key.text)-1])
-            symbols_write_record(builder, "field", name, source, key.span, parent)
+        name := fmt.tprintf("%s.%s", parent, source_name)
+        symbols_write_record(builder, "field", name, source, key.span, parent)
+        _, next_i, _, ok_type := parse_type_text_from_forms(fields.items[:], type_start)
+        if !ok_type {
+            return
         }
-        i += 2
+        i = next_i
         parsing_modifiers := true
         for parsing_modifiers && i < len(fields.items) && fields.items[i].kind == .Keyword {
             switch fields.items[i].text {
@@ -172,7 +172,7 @@ symbols_defstruct_field_index :: proc(form: CST_Form) -> (int, bool) {
     if len(form.items) >= 4 && form.items[2].kind == .String {
         field_index = 3
     }
-    if field_index >= len(form.items) || form.items[field_index].kind != .Brace {
+    if field_index >= len(form.items) || form.items[field_index].kind != .Vector {
         return -1, false
     }
     return field_index, true
@@ -221,7 +221,7 @@ symbols_local_type_bind :: proc(bindings: ^[dynamic]Local_Type_Binding, name, ty
     append(bindings, Local_Type_Binding{name = name, ty = ty})
 }
 
-symbols_obvious_local_value_type :: proc(form: CST_Form, bindings: []Local_Type_Binding) -> (string, bool) {
+symbols_obvious_local_value_type :: proc(form: CST_Form, bindings: []Local_Type_Binding, forms: []CST_Top_Form) -> (string, bool) {
     if form.kind == .Symbol {
         ty, ok := symbols_local_type_lookup(bindings, form.text)
         if ok {
@@ -231,11 +231,13 @@ symbols_obvious_local_value_type :: proc(form: CST_Form, bindings: []Local_Type_
         defer delete(mapped_name)
         return symbols_local_type_lookup(bindings, mapped_name)
     }
-    if form.kind == .List && len(form.items) == 2 && form.items[0].kind == .Symbol {
-        arg := form.items[1]
-        if arg.kind == .Brace || arg.kind == .Vector {
-            return map_name(form.items[0].text), true
+    if form.kind == .List && len(form.items) >= 1 && form.items[0].kind == .Symbol {
+        ty := map_name(form.items[0].text)
+        if fields, ok_fields := symbols_struct_fields_for_type(forms, ty); ok_fields {
+            delete(fields)
+            return ty, true
         }
+        delete(ty)
     }
     return "", false
 }
@@ -287,7 +289,7 @@ symbols_write_local_typed_fields :: proc(
     }
 }
 
-symbols_local_var_binding :: proc(form: CST_Form, bindings: []Local_Type_Binding) -> (name, ty: string, span: Span, ok: bool) {
+symbols_local_var_binding :: proc(form: CST_Form, bindings: []Local_Type_Binding, forms: []CST_Top_Form) -> (name, ty: string, span: Span, ok: bool) {
     if form.kind != .List || len(form.items) < 3 || !is_symbol(form.items[0], "defvar") {
         return "", "", {}, false
     }
@@ -313,7 +315,7 @@ symbols_local_var_binding :: proc(form: CST_Form, bindings: []Local_Type_Binding
     if value_index >= len(form.items) {
         return "", "", {}, false
     }
-    inferred_ty, ok_ty := symbols_obvious_local_value_type(form.items[value_index], bindings)
+    inferred_ty, ok_ty := symbols_obvious_local_value_type(form.items[value_index], bindings, forms)
     if !ok_ty {
         return "", "", {}, false
     }
@@ -365,7 +367,7 @@ symbols_collect_local_field_records_for_form :: proc(
     }
 
     if head == "defvar" {
-        name, ty, span, ok_var := symbols_local_var_binding(form, bindings[:])
+        name, ty, span, ok_var := symbols_local_var_binding(form, bindings[:], top_forms)
         if ok_var {
             symbols_local_type_bind(bindings, name, ty)
             symbols_write_local_typed_fields(builder, seen, file_path, source, top_forms, name, span, ty)
@@ -417,9 +419,6 @@ symbols_write_enum_variants :: proc(builder: ^strings.Builder, source, parent: s
             if key.kind == .Keyword && len(key.text) > 1 {
                 name := fmt.tprintf("%s.%s", parent, key.text[1:])
                 symbols_write_record(builder, "variant", name, source, key.span, parent)
-            } else if key.kind == .Symbol && len(key.text) > 1 && key.text[len(key.text)-1] == ':' {
-                name := fmt.tprintf("%s.%s", parent, key.text[:len(key.text)-1])
-                symbols_write_record(builder, "variant", name, source, key.span, parent)
             }
             i += 2
         }
@@ -428,23 +427,23 @@ symbols_write_enum_variants :: proc(builder: ^strings.Builder, source, parent: s
 }
 
 symbols_write_union_variants :: proc(builder: ^strings.Builder, source, parent: string, variants: CST_Form) {
-    if variants.kind != .Brace {
+    if variants.kind != .Vector {
         return
     }
     i := 0
     for i < len(variants.items) {
-        if i+1 >= len(variants.items) {
+        key := variants.items[i]
+        _, source_name, type_start, ok_typed := typed_name_parts(variants.items[:], i)
+        if !ok_typed || type_start >= len(variants.items) {
             return
         }
-        key := variants.items[i]
-        if key.kind == .Keyword && len(key.text) > 1 {
-            name := fmt.tprintf("%s.%s", parent, key.text[1:])
-            symbols_write_record(builder, "variant", name, source, key.span, parent)
-        } else if key.kind == .Symbol && len(key.text) > 1 && key.text[len(key.text)-1] == ':' {
-            name := fmt.tprintf("%s.%s", parent, key.text[:len(key.text)-1])
-            symbols_write_record(builder, "variant", name, source, key.span, parent)
+        name := fmt.tprintf("%s.%s", parent, source_name)
+        symbols_write_record(builder, "variant", name, source, key.span, parent)
+        _, next_i, _, ok_type := parse_type_text_from_forms(variants.items[:], type_start)
+        if !ok_type {
+            return
         }
-        i += 2
+        i = next_i
     }
 }
 

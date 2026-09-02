@@ -591,11 +591,15 @@ rewrite_param_vector_signature :: proc(form: CST_Form, locals: []string, aliases
         #partial switch target.kind {
         case .Symbol:
             append(&rewritten.items, target)
-            if len(target.text) == 0 || target.text[len(target.text)-1] != ':' {
+            _, _, parsed_type_start, has_annotation := typed_name_parts(form.items[:], i)
+            if !has_annotation {
                 i += 1
                 continue
             }
-            type_start = i + 1
+            type_start = parsed_type_start
+            if type_start == i+2 {
+                append(&rewritten.items, form.items[i+1])
+            }
         case .Brace:
             append(&rewritten.items, target)
             if i+1 < len(form.items) {
@@ -628,7 +632,7 @@ rewrite_param_vector_signature :: proc(form: CST_Form, locals: []string, aliases
             append(&rewritten.items, type_item)
         }
         i = next_i
-        if i < len(form.items) && is_symbol(form.items[i], "=") {
+        if i < len(form.items) && form.items[i].kind == .Keyword && form.items[i].text == ":default" {
             append(&rewritten.items, form.items[i])
             if i+1 >= len(form.items) {
                 return CST_Form{}, Compile_Error{message = "missing default parameter value", span = form.items[i].span}, false
@@ -650,18 +654,18 @@ param_names_from_signature_vector :: proc(form: CST_Form) -> (names: [dynamic]st
     }
     i := 0
     for i < len(form.items) {
-        target := form.items[i]
-        if target.kind != .Symbol || len(target.text) == 0 || target.text[len(target.text)-1] != ':' {
+        _, source_name, type_start, has_annotation := typed_name_parts(form.items[:], i)
+        if !has_annotation {
             i += 1
             continue
         }
-        append(&names, target.text[:len(target.text)-1])
-        _, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
+        append(&names, source_name)
+        _, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], type_start)
         if !ok_type {
             return names, err_type, false
         }
         i = next_i
-        if i < len(form.items) && is_symbol(form.items[i], "=") {
+        if i < len(form.items) && form.items[i].kind == .Keyword && form.items[i].text == ":default" {
             i += 2
         }
     }
@@ -912,7 +916,7 @@ rewrite_struct_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []
             append(&rewritten.form.items, renamed)
             continue
         }
-        if item.kind != .Brace || rewrote_fields {
+        if item.kind != .Vector || rewrote_fields {
             append(&rewritten.form.items, clone_cst_form(item))
             continue
         }
@@ -922,16 +926,26 @@ rewrite_struct_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []
         field_idx := 0
         for field_idx < len(item.items) {
             append(&fields.items, clone_cst_form(item.items[field_idx]))
-            if field_idx+1 >= len(item.items) {
+            _, _, type_start, has_annotation := typed_name_parts(item.items[:], field_idx)
+            if !has_annotation || type_start >= len(item.items) {
                 field_idx += 1
                 continue
             }
-            field_type, err_type, ok_type := rewrite_type_form_symbols(item.items[field_idx+1], locals, aliases, prefix)
+            if type_start == field_idx+2 {
+                append(&fields.items, clone_cst_form(item.items[field_idx+1]))
+            }
+            _, next_idx, err_type, ok_type := parse_type_text_from_forms(item.items[:], type_start)
             if !ok_type {
                 return CST_Top_Form{}, err_type, false
             }
-            append(&fields.items, field_type)
-            field_idx += 2
+            for type_item in item.items[type_start:next_idx] {
+                field_type, err_field_type, ok_field_type := rewrite_type_form_symbols(type_item, locals, aliases, prefix)
+                if !ok_field_type {
+                    return CST_Top_Form{}, err_field_type, false
+                }
+                append(&fields.items, field_type)
+            }
+            field_idx = next_idx
             parsing_modifiers := true
             for parsing_modifiers &&
                 field_idx < len(item.items) &&

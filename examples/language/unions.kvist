@@ -3,10 +3,10 @@
 
 (defunion Value
   "Simple tagged value."
-  {
+  [
   i: int
   s: string
-})
+])
 
 (defn describe [value: Value] -> string
   (case value
@@ -15,14 +15,14 @@
     "nil"))
 
 (defn main []
-  (let [number (Value {i: 42})
-        text (Value {s: "kvist"})]
+  (let [number (Value :i 42)
+        text (Value :s "kvist")]
     (println (describe text))))
 
 (comment
-  (describe (Value {i: 42}))
+  (describe (Value :i 42))
   ;; => int
 
-  (describe (Value {s: "kvist"}))
+  (describe (Value :s "kvist"))
   ;; => kvist
 )

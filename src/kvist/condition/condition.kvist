@@ -6,19 +6,19 @@
 (defstruct Condition
   "A signalled condition's stable kind, human-readable message, and dynamic
   Data context."
-  {
+  [
     kind: string
     message: string
     data: Data
-  })
+  ])
 
 (defstruct Decision
   "A handler response selecting an advertised restart and optional value."
-  {
+  [
     handled: bool
     restart: string
     value: string
-  })
+  ])
 
 (def Handler
   "A procedure from condition.Condition to condition.Decision."

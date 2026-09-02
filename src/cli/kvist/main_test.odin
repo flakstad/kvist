@@ -9,7 +9,7 @@ import kvist "../../odin/kvist"
 reload_app_config_accepts_typed_version :: proc(t: ^testing.T) {
     source := `(package reload_demo)
 (import reload "kvist:reload")
-(defstruct App_State {steps: int})
+(defstruct App_State [steps: int])
 (def Reload_State App_State)
 (def Reload_Version: string "v1")
 (defn run [state: ^Reload_State host: ^reload.Run_Host]
@@ -655,8 +655,8 @@ odin_timing_output_filter_preserves_program_output :: proc(t: ^testing.T) {
     defer delete(filtered)
     testing.expect_value(t, filtered, "hello from kvist\n")
 
-    diagnostic := "generated.odin(2:3) Error: bad value\nTotal Time - 1.000 ms - 100.00%\n"
+    diagnostic := "generated.odin(2:3) :Error bad value\nTotal Time - 1.000 ms - 100.00%\n"
     filtered_diagnostic := filter_odin_timing_output(diagnostic)
     defer delete(filtered_diagnostic)
-    testing.expect_value(t, filtered_diagnostic, "generated.odin(2:3) Error: bad value\n")
+    testing.expect_value(t, filtered_diagnostic, "generated.odin(2:3) :Error bad value\n")
 }

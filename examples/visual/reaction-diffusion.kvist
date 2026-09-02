@@ -23,7 +23,7 @@
 (def Hud-Font-Spacing: f32 1.0)
 
 (defstruct App-State
-  {a: [dynamic]f32
+  [a: [dynamic]f32
    b: [dynamic]f32
    next-a: [dynamic]f32
    next-b: [dynamic]f32
@@ -34,7 +34,7 @@
    metric-start: f64
    fps: f64
    update-ms: f64
-   draw-ms: f64})
+   draw-ms: f64])
 
 (defn idx
   "Convert grid x.y coordinates into a flat array index."
@@ -249,18 +249,18 @@
         b (make-buffer)
         next-a (make-buffer)
         next-b (make-buffer)
-        state (App-State {a: a
-                          b: b
-                          next-a: next-a
-                          next-b: next-b
-                          target-fps: Initial-Target-FPS
-                          steps-per-frame: Initial-Steps-Per-Frame
-                          paused: false
-                          frames: 0
-                          metric-start: (rl.GetTime)
-                          fps: 0
-                          update-ms: 0
-                          draw-ms: 0})]
+        state (App-State :a a
+                          :b b
+                          :next-a next-a
+                          :next-b next-b
+                          :target-fps Initial-Target-FPS
+                          :steps-per-frame Initial-Steps-Per-Frame
+                          :paused false
+                          :frames 0
+                          :metric-start (rl.GetTime)
+                          :fps 0
+                          :update-ms 0
+                          :draw-ms 0)]
     (rl.SetTextureFilter font.texture .BILINEAR)
     (defer (rl.UnloadFont font))
     (defer (delete state.a))

@@ -173,8 +173,8 @@ write_compiler_defer_expression :: proc(
 		y := pbt.draw(t, pbt.int_range(-5, 5))
 		multiplier := pbt.draw(t, pbt.int_range(-2, 2))
 		addend := pbt.draw(t, pbt.int_range(-4, 4))
-		strings.write_string(builder, "(let [point (Pbt-Point {x: ")
-		fmt.sbprintf(builder, "%d y: %d weight: 0 active?: false})] (block (defer (pbt-defer-step! (addr point.x) %d %d))) (+ (* point.x 31) point.y))", x, y, multiplier, addend)
+		strings.write_string(builder, "(let [point (Pbt-Point :x ")
+		fmt.sbprintf(builder, "%d :y %d :weight 0 :active? false)] (block (defer (pbt-defer-step! (addr point.x) %d %d))) (+ (* point.x 31) point.y))", x, y, multiplier, addend)
 		return (x * multiplier + addend) * 31 + y
 	case 10:
 		stats.single_call += 1

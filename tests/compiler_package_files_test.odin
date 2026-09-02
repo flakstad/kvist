@@ -321,7 +321,7 @@ compile_path_package_files_are_order_independent :: proc(t: ^testing.T) {
     defer delete(types_path)
     types_source := `(package order-independent)
 
-(defstruct Box {value: int})`
+(defstruct Box [value: int])`
     types_write_err := os.write_entire_file_from_string(types_path, types_source)
     testing.expect_value(t, types_write_err == nil, true)
     if types_write_err != nil {
@@ -337,7 +337,7 @@ compile_path_package_files_are_order_independent :: proc(t: ^testing.T) {
     macros_source := `(package order-independent)
 
 (defmacro- emit-box [n]
-  (quasiquote (Box {value: (unquote n)})))
+  (quasiquote (Box :value (unquote n))))
 
 (defmacro make-box [n]
   (emit-box n))`

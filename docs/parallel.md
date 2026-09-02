@@ -51,12 +51,12 @@ no collection:
 Use `p.map-with` or `p.for-with` to choose a worker count explicitly:
 
 ```clojure
-(p.map-with {workers: 4} score-user users)
-(p.for-with {workers: 4} send-email users)
+(p.map-with :workers 4 score-user users)
+(p.for-with :workers 4 send-email users)
 ```
 
-The option must be a brace literal with a `workers:` label. Other option names,
-duplicate `workers:` labels, or a bare number are rejected during lowering.
+The option must be a keyword map with a `:workers` key. Other option names,
+duplicate `:workers` keys, or a bare number are rejected during lowering.
 
 ## Worker Count
 
@@ -73,10 +73,10 @@ Explicit worker counts are clamped to at least `1` and at most `len(xs)`.
 - `p.detach` workers must not return a value
 - `p.map` accepts a known named one-argument worker or inline
   one-argument `fn`
-- `p.map-with` accepts only `{workers: n}` options
+- `p.map-with` accepts only `{:workers n}` options
 - `p.for` accepts a known named one-argument worker or inline
   one-argument `fn` with no return value
-- `p.for-with` accepts only `{workers: n}` options
+- `p.for-with` accepts only `{:workers n}` options
 - `p.result` is blocking and consumes the task handle
 - there is no cancellation surface
 

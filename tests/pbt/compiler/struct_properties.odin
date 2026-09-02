@@ -103,9 +103,9 @@ write_compiler_struct_expression :: proc(
 		return compiler_point_score(point)
 	case 1:
 		stats.omitted_fields += 1
-		strings.write_string(builder, "(pbt-point-score (Pbt-Point {x: ")
+		strings.write_string(builder, "(pbt-point-score (Pbt-Point :x ")
 		fmt.sbprintf(builder, "%d", point.x)
-		strings.write_string(builder, "}))")
+		strings.write_string(builder, "))")
 		return point.x * 31
 	case 2:
 		stats.copy_mutation += 1
@@ -150,11 +150,11 @@ write_compiler_struct_expression :: proc(
 		stats.nested_assoc += 1
 		bias := pbt.draw(t, pbt.int_range(-8, 8))
 		new_x := pbt.draw(t, pbt.int_range(-8, 8))
-		strings.write_string(builder, "(let [original (Pbt-Box {point: ")
+		strings.write_string(builder, "(let [original (Pbt-Box :point ")
 		write_compiler_point_literal(builder, point)
 		fmt.sbprintf(
 			builder,
-			" bias: %d}) newer (assoc original.point.x %d)] (+ (* (pbt-box-score original) 7) (pbt-box-score newer)))",
+			" :bias %d) newer (assoc original.point.x %d)] (+ (* (pbt-box-score original) 7) (pbt-box-score newer)))",
 			bias,
 			new_x,
 		)
@@ -165,9 +165,9 @@ write_compiler_struct_expression :: proc(
 		stats.nested_update += 1
 		bias := pbt.draw(t, pbt.int_range(-8, 8))
 		delta := pbt.draw(t, pbt.int_range(-5, 5))
-		strings.write_string(builder, "(let [original (Pbt-Box {point: ")
+		strings.write_string(builder, "(let [original (Pbt-Box :point ")
 		write_compiler_point_literal(builder, point)
-		fmt.sbprintf(builder, " bias: %d}) newer (update original.point.weight + %d)] (pbt-box-score newer))", bias, delta)
+		fmt.sbprintf(builder, " :bias %d) newer (update original.point.weight + %d)] (pbt-box-score newer))", bias, delta)
 		point.weight += delta
 		return compiler_point_score(point) * 7 + bias
 	case 7:
@@ -212,16 +212,16 @@ generated_compiler_point :: proc(t: ^pbt.T) -> Compiler_Point_Model {
 }
 
 write_compiler_point_literal :: proc(builder: ^strings.Builder, point: Compiler_Point_Model) {
-	strings.write_string(builder, "(Pbt-Point {x: ")
+	strings.write_string(builder, "(Pbt-Point :x ")
 	fmt.sbprintf(
 		builder,
-		"%d y: %d weight: %d active?: %t",
+		"%d :y %d :weight %d :active? %t",
 		point.x,
 		point.y,
 		point.weight,
 		point.active,
 	)
-	strings.write_string(builder, "})")
+	strings.write_string(builder, ")")
 }
 
 compiler_point_score :: proc(point: Compiler_Point_Model) -> int {

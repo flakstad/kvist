@@ -1,14 +1,14 @@
 ;; Iterator protocol over log-like lines with for, into, and transduce consumers.
 (package main)
 
-(defstruct Log_Source {
+(defstruct Log_Source [
   lines: []string
   index: int
   disposed?: bool
-})
+])
 
 (defn open-log-lines [lines: []string] -> Log_Source
-  (Log_Source {lines: lines index: 0 disposed?: false}))
+  (Log_Source :lines lines :index 0 :disposed? false))
 
 (defn next-log-line [src: ^Log_Source] -> [line: string ok: bool]
   (if (< src.index (count src.lines))

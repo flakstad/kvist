@@ -45,8 +45,8 @@ compile_shipped_struct_source_package_uses_wrapper_resolution :: proc(t: ^testin
 (import soa "kvist:soa")
 
 (defstruct Profile
-  {name: string
-   active?: bool})
+  [name: string
+   active?: bool])
 
 (defn main []
   (println (soa.fields 'Profile) (soa.types 'Profile)))`
@@ -352,7 +352,7 @@ compile_source_with_shipped_reload_package_exposes_run_host_alias :: proc(t: ^te
 (import reload "kvist:reload")
 
 (defstruct App_State
-  {requests: int})
+  [requests: int])
 
 (def Reload_State App_State)
 
@@ -412,7 +412,7 @@ compile_source_with_shipped_reload_package_allows_any_import_alias :: proc(t: ^t
 (import r "kvist:reload")
 
 (defstruct App_State
-  {requests: int})
+  [requests: int])
 
 (def Reload_State App_State)
 

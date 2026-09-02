@@ -3,9 +3,9 @@
 (package main)
 (import core "kvist:core")
 
-(defstruct Request {
+(defstruct Request [
   path: string
-})
+])
 
 (defn apply-pred [pred: (fn [x: int] -> bool), x: int] -> bool
   (pred x))
@@ -25,14 +25,14 @@
 (defn main []
   (let [pred: (fn [x: int] -> bool) (fn [x: int] -> bool
                                            (greater-than? 10 x))
-        req (Request {path: "/users"})]
+        req (Request :path "/users")]
     (println (apply-pred pred 12))))
 
 (comment
   (greater-than? 3 5)
   ;; => true
 
-  (path-len (Request {path: "/users"}))
+  (path-len (Request :path "/users"))
   ;; => 6
 
   (maybe-path-len nil)

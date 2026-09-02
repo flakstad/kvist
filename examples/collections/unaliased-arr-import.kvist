@@ -2,19 +2,19 @@
 (package main)
 (import "kvist:arr" :refer [map filter reduce count-by sort])
 
-(defstruct Order {
+(defstruct Order [
   id: int
   region: string
   amount: int
   settled?: bool
-})
+])
 
 (defn sample-orders [] -> [dynamic]Order
-  (arr.dynamic Order [(Order {id: 1 region: "north" amount: 80 settled?: true})
-                      (Order {id: 2 region: "west" amount: 35 settled?: false})
-                      (Order {id: 3 region: "north" amount: 120 settled?: true})
-                      (Order {id: 4 region: "south" amount: 40 settled?: true})
-                      (Order {id: 5 region: "west" amount: 95 settled?: true})]))
+  (arr.dynamic Order [(Order :id 1 :region "north" :amount 80 :settled? true)
+                      (Order :id 2 :region "west" :amount 35 :settled? false)
+                      (Order :id 3 :region "north" :amount 120 :settled? true)
+                      (Order :id 4 :region "south" :amount 40 :settled? true)
+                      (Order :id 5 :region "west" :amount 95 :settled? true)]))
 
 (defn settled? [order: Order] -> bool
   order.settled?)

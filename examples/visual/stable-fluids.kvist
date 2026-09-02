@@ -24,7 +24,7 @@
 (def Hud-Font-Spacing: f32 1.0)
 
 (defstruct App-State
-  {density: [dynamic]f32
+  [density: [dynamic]f32
    density0: [dynamic]f32
    vx: [dynamic]f32
    vy: [dynamic]f32
@@ -41,7 +41,7 @@
    metric-start: f64
    fps: f64
    update-ms: f64
-   draw-ms: f64})
+   draw-ms: f64])
 
 (defn idx
   "Convert grid x.y coordinates into a flat array index."
@@ -485,24 +485,24 @@
         vy (make-buffer)
         vx0 (make-buffer)
         vy0 (make-buffer)
-        state (App-State {density: density
-                          density0: density0
-                          vx: vx
-                          vy: vy
-                          vx0: vx0
-                          vy0: vy0
-                          target-fps: Initial-Target-FPS
-                          steps-per-frame: Initial-Steps-Per-Frame
-                          paused: false
-                          show-velocity: false
-                          has-last-mouse: false
-                          last-mouse-x: 0
-                          last-mouse-y: 0
-                          frames: 0
-                          metric-start: (rl.GetTime)
-                          fps: 0
-                          update-ms: 0
-                          draw-ms: 0})]
+        state (App-State :density density
+                          :density0 density0
+                          :vx vx
+                          :vy vy
+                          :vx0 vx0
+                          :vy0 vy0
+                          :target-fps Initial-Target-FPS
+                          :steps-per-frame Initial-Steps-Per-Frame
+                          :paused false
+                          :show-velocity false
+                          :has-last-mouse false
+                          :last-mouse-x 0
+                          :last-mouse-y 0
+                          :frames 0
+                          :metric-start (rl.GetTime)
+                          :fps 0
+                          :update-ms 0
+                          :draw-ms 0)]
     (rl.SetTextureFilter font.texture .BILINEAR)
     (defer (rl.UnloadFont font))
     (defer (delete state.density))

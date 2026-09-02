@@ -298,15 +298,22 @@ macroexpand_def_binding_form_preserving_types :: proc(form: CST_Form, macros: []
         value_index = 3
     }
 
-    if form.items[1].kind == .Symbol &&
-       len(form.items[1].text) > 0 &&
-       form.items[1].text[len(form.items[1].text)-1] == ':' {
-        _, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], value_index)
+    type_start := value_index
+    has_annotation := form.items[1].kind == .Symbol &&
+                      len(form.items[1].text) > 1 &&
+                      form.items[1].text[len(form.items[1].text)-1] == ':'
+    if !has_annotation && value_index < len(form.items) && is_type_separator_form(form.items[value_index]) {
+        append(&expanded.items, clone_cst_form(form.items[value_index]))
+        type_start = value_index + 1
+        has_annotation = true
+    }
+    if has_annotation {
+        _, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], type_start)
         if !ok_type {
             delete_cst_form(&expanded)
             return CST_Form{}, err_type, false
         }
-        for type_item in form.items[value_index:next_i] {
+        for type_item in form.items[type_start:next_i] {
             append(&expanded.items, clone_cst_form(type_item))
         }
         value_index = next_i
@@ -339,24 +346,28 @@ macroexpand_param_vector_preserving_types :: proc(form: CST_Form, macros: []User
     for i < len(form.items) {
         target := form.items[i]
         append(&expanded.items, clone_cst_form(target))
-        if target.kind != .Symbol || len(target.text) == 0 || target.text[len(target.text)-1] != ':' {
+        _, _, type_start, has_annotation := typed_name_parts(form.items[:], i)
+        if !has_annotation {
             i += 1
             continue
         }
-        if i+1 >= len(form.items) {
+        if type_start >= len(form.items) {
             i += 1
             continue
         }
-        _, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
+        if type_start == i+2 {
+            append(&expanded.items, clone_cst_form(form.items[i+1]))
+        }
+        _, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], type_start)
         if !ok_type {
             delete_cst_form(&expanded)
             return CST_Form{}, err_type, false
         }
-        for type_item in form.items[i+1:next_i] {
+        for type_item in form.items[type_start:next_i] {
             append(&expanded.items, clone_cst_form(type_item))
         }
         i = next_i
-        if i < len(form.items) && is_symbol(form.items[i], "=") {
+        if i < len(form.items) && form.items[i].kind == .Keyword && form.items[i].text == ":default" {
             append(&expanded.items, clone_cst_form(form.items[i]))
             if i+1 >= len(form.items) {
                 delete_cst_form(&expanded)

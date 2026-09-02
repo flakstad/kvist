@@ -47,7 +47,7 @@
 (def Brush-Erase: int 2)
 
 (defstruct App-State
-  {world: World
+  [world: World
    belief: Robot-Belief
    robot: Robot
    sensors: Sensors
@@ -72,7 +72,7 @@
    metric-start: f64
    fps: f64
    update-ms: f64
-   draw-ms: f64})
+   draw-ms: f64])
 
 (defn v2
   "Construct a raylib 2D vector."
@@ -181,32 +181,32 @@
 (defn make-app-state
   "Allocate a complete simulation state with default robot world and controls."
   [] -> App-State
-  (let [state (App-State {world: (make-world)
-                          belief: (make-belief)
-                          robot: (make-robot)
-                          sensors: (Sensors {})
-                          paused: false
-                          sim-speed: 1.0
-                          sim-credit: 0.0
-                          show-grid: true
-                          show-sensors: true
-                          brush-mode: Brush-Obstacle
-                          rain: false
-                          hills: false
-                          reflex-enabled: true
-                          lifted: false
-                          bumper: false
-                          comms-ok: true
-                          charging: false
-                          undocking: false
-                          dock-time: 0.0
-                          battery: 100.0
-                          mission-time: 0.0
-                          frames: 0
-                          metric-start: 0.0
-                          fps: 0
-                          update-ms: 0
-                          draw-ms: 0})]
+  (let [state (App-State :world (make-world)
+                          :belief (make-belief)
+                          :robot (make-robot)
+                          :sensors (Sensors [])
+                          :paused false
+                          :sim-speed 1.0
+                          :sim-credit 0.0
+                          :show-grid true
+                          :show-sensors true
+                          :brush-mode Brush-Obstacle
+                          :rain false
+                          :hills false
+                          :reflex-enabled true
+                          :lifted false
+                          :bumper false
+                          :comms-ok true
+                          :charging false
+                          :undocking false
+                          :dock-time 0.0
+                          :battery 100.0
+                          :mission-time 0.0
+                          :frames 0
+                          :metric-start 0.0
+                          :fps 0
+                          :update-ms 0
+                          :draw-ms 0)]
     (reset-app! (addr state))
     state))
 

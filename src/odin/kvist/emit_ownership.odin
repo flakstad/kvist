@@ -155,23 +155,26 @@ form_is_owned_constructor_result :: proc(form: CST_Form) -> bool {
     return false
 }
 
-form_is_literal_constructor_call :: proc(form: CST_Form) -> bool {
+form_is_literal_constructor_call :: proc(form: CST_Form, e: ^Emitter = nil) -> bool {
     if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
         return false
     }
-    return false
-}
-
-form_is_named_arg_brace :: proc(form: CST_Form) -> bool {
-    if form.kind != .Brace || len(form.items)%2 != 0 {
-        return false
+    head_name := map_name(form.items[0].text)
+    defer delete(head_name)
+    if _, ok_struct := find_struct_decl(e, head_name); ok_struct {
+        return true
     }
-    for i := 0; i < len(form.items); i += 2 {
-        if _, ok_key := brace_key_name(form.items[i]); !ok_key {
-            return false
+    if _, ok_union := find_union_decl(e, head_name); ok_union {
+        return true
+    }
+    if symbol_tail_starts_upper(form.items[0].text) {
+        imported_fields, ok_imported := imported_odin_type_fields(e, head_name)
+        if ok_imported {
+            delete_struct_field_slice(&imported_fields)
+            return true
         }
     }
-    return true
+    return false
 }
 
 form_produces_owned_value :: proc(form: CST_Form, e: ^Emitter = nil) -> bool {

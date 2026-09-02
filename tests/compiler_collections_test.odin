@@ -16,7 +16,7 @@ compile_malli_types_and_empty_collection_constructors :: proc(t: ^testing.T) {
 (import map "kvist:map")
 (import set "kvist:set")
 
-(defn score [xs: [dynamic]int, tags: (map string (struct {}))] -> int
+(defn score [xs: [dynamic]int, tags: (map string (struct []))] -> int
     (let [out (arr.empty int 4)
         lookup (map.empty string int)
         seen (set.empty string 8)]
@@ -45,7 +45,7 @@ reject_public_soa_struct_introspection_as_compiler_form :: proc(t: ^testing.T) {
 (import soa "kvist:soa")
 
 (defstruct Profile
-  {name: string})
+  [name: string])
 
 (defn main []
   (println (soa/fields 'Profile)))`
@@ -59,7 +59,7 @@ reject_public_soa_struct_introspection_as_compiler_form :: proc(t: ^testing.T) {
 (import soa "kvist:soa")
 
 (defstruct Profile
-  {name: string})
+  [name: string])
 
 (defn main []
   (println (soa/types 'Profile)))`
@@ -477,15 +477,15 @@ compile_field_selector_callbacks_for_sequence_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")
 
-(defstruct User {
+(defstruct User [
   name: string
   amount: int
   verified: bool
-})
+])
 
 (defn main []
-  (let [users ([]User [(User {name: "Ada" amount: 10 verified: true})
-                           (User {name: "Lin" amount: 20 verified: false})])
+  (let [users ([]User [(User :name "Ada" :amount 10 :verified true)
+                           (User :name "Lin" :amount 20 :verified false)])
         names (arr.map .name users)
         by-name (arr.index-by .name users)
         by-verified (arr.group-by .verified users)
@@ -494,8 +494,8 @@ compile_field_selector_callbacks_for_sequence_helpers :: proc(t: ^testing.T) {
         groups (arr.partition-by .verified users)
         distinct-names (arr.distinct-by .name users)
         sorted (arr.sort-by .name users)
-        mutated ([dynamic]User [(User {name: "Ada" amount: 10 verified: true})
-                                    (User {name: "Lin" amount: 20 verified: false})])
+        mutated ([dynamic]User [(User :name "Ada" :amount 10 :verified true)
+                                    (User :name "Lin" :amount 20 :verified false)])
         verified (arr.filter .verified users)
         unverified (arr.remove .verified users)
         [first ok] (arr.find .verified users)
@@ -724,12 +724,12 @@ report_namespaced_sequence_helper_errors_with_surface_name :: proc(t: ^testing.T
 compile_collection_type_forms_and_make :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct State {
+(defstruct State [
   values: (slice int)
   buffer: (dynamic int)
   lookup: (map string int)
   next: (ptr State)
-})
+])
 
 (defn main []
   (let [values ((slice int) [1 2 3])
@@ -771,15 +771,15 @@ compile_soa_type_call_column_access_and_push :: proc(t: ^testing.T) {
 (import arr "kvist:arr")
 (import soa "kvist:soa")
 
-(defstruct Particle {
+(defstruct Particle [
   mass: f32
   id: int
-})
+])
 
 (defn fixed-first [] -> f32
   (let [particles (#soa[2]Particle
-                    [(Particle {mass: 1 id: 10})
-                     (Particle {mass: 2 id: 20})])]
+                    [(Particle :mass 1 :id 10)
+                     (Particle :mass 2 :id 20)])]
     (arr.get particles.mass 0)))
 
 (defn add-particle! [particles: ^#soa[dynamic]Particle
@@ -789,9 +789,9 @@ compile_soa_type_call_column_access_and_push :: proc(t: ^testing.T) {
 
 (defn dynamic-score [] -> f32
   (let [particles (#soa[dynamic]Particle
-                    [(Particle {mass: 1 id: 10})])]
+                    [(Particle :mass 1 :id 10)])]
     (defer (delete particles))
-    (soa.push! (addr particles) (Particle {mass: 2 id: 20}))
+    (soa.push! (addr particles) (Particle :mass 2 :id 20))
     (set! particles.mass[0] 12)
     (+ (arr.get particles.mass 0)
        (arr.get particles 1).mass)))`
@@ -822,9 +822,9 @@ compile_soa_type_call_column_access_and_push :: proc(t: ^testing.T) {
 reject_soa_make_raw_as_compiler_form :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Particle {
+(defstruct Particle [
   x: f32
-})
+])
 
 (defn main []
   (soa-make-raw #soa[dynamic]Particle 7))`
@@ -846,16 +846,16 @@ compile_soa_column_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 (import soa "kvist:soa")
 
-(defstruct Particle {
+(defstruct Particle [
   x: f32
   vx: f32
-})
+])
 
 (defn update-columns [] -> f32
   (let [particles (soa.make Particle 2)]
     (defer (delete particles))
-    (soa.push! (addr particles) (Particle {x: 1 vx: 2}))
-    (soa.push! (addr particles) (Particle {x: 3 vx: 4}))
+    (soa.push! (addr particles) (Particle :x 1 :vx 2))
+    (soa.push! (addr particles) (Particle :x 3 :vx 4))
     (soa.axpy! particles .x 0.5 .vx)
     (soa.clamp! particles .x 0.0 4.0)
     (let [total: f32 0]
@@ -915,10 +915,10 @@ compile_bit_set_and_simd_surface_type_constructors :: proc(t: ^testing.T) {
 compile_array_map_literals_and_typed_let_type_forms :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Config {
+(defstruct Config [
   ports: (array 3 int)
   lookup: (map string int)
-})
+])
 
 (defn main []
   (let [ports: (array 3 int) ((array 3 int) [80 443 8080])
@@ -954,14 +954,14 @@ main :: proc() {
 compile_typed_map_literal_passes_value_type_to_let_values :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Entry {
+(defstruct Entry [
   attrs: [dynamic]string
-})
+])
 
 (defn entries [] -> map[string]Entry
   (map[string]Entry
     {"one" (let [attrs ([dynamic]string ["name" "email"])]
-             (Entry {attrs: attrs}))}))`
+             (Entry :attrs attrs))}))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -980,8 +980,8 @@ compile_typed_map_literal_passes_value_type_to_let_values :: proc(t: ^testing.T)
 compile_typed_set_literal_passes_element_type_to_let_items :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defn tags [] -> (map string (struct {}))
-  ((map string (struct {})) #{(let [tag "name"] tag)}))`
+(defn tags [] -> (map string (struct []))
+  ((map string (struct [])) #{(let [tag "name"] tag)}))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -1028,7 +1028,7 @@ keyword :: distinct string
 compile_keyword_set_literal :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defn modes [] -> (map keyword (struct {}))
+(defn modes [] -> (map keyword (struct []))
   #{:env/dev :env/prod})`
 
     output, err, ok := kvist.compile_source(source)
@@ -1177,7 +1177,7 @@ compile_typed_empty_inline_collection_literals :: proc(t: ^testing.T) {
 (defn score [] -> int
   (let [xs: [dynamic]int [] :defer
         lookup: map[string]int {} :defer
-        tags: (map string (struct {})) #{} :defer]
+        tags: (map string (struct [])) #{} :defer]
     (println lookup tags)
     (arr.count xs)))`
 
@@ -1422,10 +1422,10 @@ compile_odin_append_accepts_pointer_to_dynamic_array :: proc(t: ^testing.T) {
 compile_pointer_to_set_type_constructors :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defn count-caret [seen: (ptr (map string (struct {})))] -> int
+(defn count-caret [seen: (ptr (map string (struct [])))] -> int
   (count (deref seen)))
 
-(defn count-list [seen: (ptr (map string (struct {})))] -> int
+(defn count-list [seen: (ptr (map string (struct [])))] -> int
   (count (deref seen)))
 
 (defn count-map [seen: ^map[string]int] -> int
@@ -1459,7 +1459,7 @@ compile_pointer_to_map_and_set_mutation_helpers :: proc(t: ^testing.T) {
 (import map "kvist:map")
 (import set "kvist:set")
 
-(defn mark-seen! [seen: (ptr (map string (struct {}))), lookup: ^map[string]int] -> bool
+(defn mark-seen! [seen: (ptr (map string (struct []))), lookup: ^map[string]int] -> bool
   (set.add! seen "a")
   (set.remove! seen "b")
   (map.assoc! lookup "a" 1)

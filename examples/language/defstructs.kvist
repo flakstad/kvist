@@ -6,57 +6,57 @@
 (import set "kvist:set")
 (defstruct Point
   "A 2D point."
-  {x: float
-   y: float})
+  [x: float
+   y: float])
 
 (defstruct Profile
   "Small profile data."
-  {name: string
+  [name: string
    age: int
    active?: bool
-   tags: (map string (struct {}))
-   home: Point})
+   tags: (map string (struct []))
+   home: Point])
 
 (defstruct Named
   "Reusable name payload."
-  {name: string})
+  [name: string])
 
 (defstruct Named-Score
   "Uses Odin's using field promotion for the embedded name."
-  {named: Named :using
-   score: int})
+  [named: Named :using
+   score: int])
 
 (defn profile-defaults [] -> Profile
-  (Profile {name: "Ada"}))
+  (Profile :name "Ada"))
 
 (defn profile-home-x [] -> f64
-  (let [profile (Profile {name: "Ada"})]
+  (let [profile (Profile :name "Ada")]
     profile.home.x))
 
 (defn profile-has-math-tag? [] -> bool
   (let [tags (set.empty string 2) :defer]
     (set.add! tags "math")
     (set.add! tags "lisp")
-    (let [profile (Profile {name: "Ada"
-                            tags: tags})]
+    (let [profile (Profile :name "Ada"
+                            :tags tags)]
       (contains? profile.tags "math"))))
 
 (defn profile-active? [] -> bool
-  (let [profile (Profile {name: "Ada"
-                          active?: true})]
+  (let [profile (Profile :name "Ada"
+                          :active? true)]
     profile.active_p))
 
 (defn profile-summary [] -> string
-  (let [profile (Profile {name: "Ada"
-                          age: 36})]
+  (let [profile (Profile :name "Ada"
+                          :age 36)]
     (fmt.tprintf "%s/%d" profile.name profile.age)))
 
 (defn profile-summary-from [profile: Profile] -> string
   (fmt.tprintf "%s/%d/%t" profile.name profile.age profile.active_p))
 
 (defn promoted-name [] -> string
-  (let [score (Named-Score {named: (Named {name: "Ada"})
-                            score: 42})]
+  (let [score (Named-Score :named (Named :name "Ada")
+                            :score 42)]
     score.name))
 
 (defn main []
@@ -80,7 +80,7 @@
   (profile-summary)
   ;; => "Ada/36"
 
-  (profile-summary-from (Profile {name: "Ada" age: 36 active?: true}))
+  (profile-summary-from (Profile :name "Ada" :age 36 :active? true))
   ;; => "Ada/36/true"
 
   ;; :using lowers to Odin's using field modifier, so the embedded field's

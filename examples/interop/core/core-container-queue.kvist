@@ -7,15 +7,15 @@
 (package main)
 (import queue "core:container/queue")
 
-(defstruct Job {
+(defstruct Job [
   id: int
   priority: int
-})
+])
 
 (defn fifo-total [] -> int
   ;; queue.Queue(int) is an Odin polymorphic type constructor. Kvist spells it
   ;; `(typeid queue.Queue int)` and then uses the ordinary queue API.
-  (let [q: (typeid queue.Queue int) {}]
+  (let [q: (typeid queue.Queue int) (zero (typeid queue.Queue int))]
     (let [err (queue.init (addr q))]
       (if (!= err nil)
         0
@@ -28,20 +28,20 @@
 
 (defn generic-constructor-empty? [] -> bool
   ;; Generic type-call sugar for imported Odin types.
-  (let [q (queue.Queue int {})]
+  (let [q ((queue.Queue int) [])]
     (= (queue.len q) 0)))
 
 (defn deque-score [] -> int
   ;; The same container can behave like a queue or stack depending on which end
   ;; you push.pop. This is still mutation over an owned Odin value.
-  (let [q: (typeid queue.Queue Job) {}]
+  (let [q: (typeid queue.Queue Job) (zero (typeid queue.Queue Job))]
     (let [err (queue.init (addr q) 4)]
       (if (!= err nil)
         0
         (do
           (defer (queue.destroy (addr q)))
-          (queue.push-back (addr q) (Job {id: 1 priority: 10}))
-          (queue.push-front (addr q) (Job {id: 2 priority: 50}))
+          (queue.push-back (addr q) (Job :id 1 :priority 10))
+          (queue.push-front (addr q) (Job :id 2 :priority 50))
           (let [first-job (queue.pop-front (addr q))
                 second-job (queue.pop-front (addr q))]
             (+ first-job.priority second-job.priority)))))))
@@ -49,7 +49,7 @@
 (defn safe-pop-score [] -> int
   ;; Safe pop returns value + bool. That is a normal Odin found.ok convention,
   ;; so Kvist uses if-let rather than error handling.
-  (let [q: (typeid queue.Queue int) {}]
+  (let [q: (typeid queue.Queue int) (zero (typeid queue.Queue int))]
     (let [err (queue.init (addr q))]
       (if (!= err nil)
         0

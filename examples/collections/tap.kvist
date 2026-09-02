@@ -3,13 +3,13 @@
 (import core "kvist:core")
 (import arr "kvist:arr")
 
-(defstruct User {
+(defstruct User [
   name: string
   age: int
-})
+])
 
 (defn inspected-age [] -> int
-  (let [user (tap> "user" (User {name: "Ada" age: 36}))
+  (let [user (tap> "user" (User :name "Ada" :age 36))
         age (tap> "age" user.age)]
     age))
 

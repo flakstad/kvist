@@ -102,7 +102,7 @@ write_compiler_map_set_expression :: proc(
 	}
 	if kind == 6 {
 		stats.empty_set += 1
-		strings.write_string(builder, "(let [members: (map int (struct {})) #{} :defer] (count members))")
+		strings.write_string(builder, "(let [members: (map int (struct [])) #{} :defer] (count members))")
 		return 0
 	}
 
@@ -192,7 +192,7 @@ write_compiler_map_set_expression :: proc(
 		other := generated_compiler_map_model(t)
 		selected := model if condition else other
 		index := pbt.draw(t, pbt.int_range(0, selected.length - 1))
-		strings.write_string(builder, "(let [members: (map int (struct {})) (if (identity-bool ")
+		strings.write_string(builder, "(let [members: (map int (struct [])) (if (identity-bool ")
 		fmt.sbprintf(builder, "%t) ", condition)
 		write_compiler_set_literal(builder, model)
 		strings.write_byte(builder, ' ')

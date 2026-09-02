@@ -35,9 +35,9 @@ compile_direct_dynamic_array_expr_borrows_as_slice_argument :: proc(t: ^testing.
 compile_dynamic_array_local_borrows_as_slice_argument :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Order {
+(defstruct Order [
   amount: int
-})
+])
 
 (defn total [orders: []Order] -> int
   (let [sum 0]
@@ -46,8 +46,8 @@ compile_dynamic_array_local_borrows_as_slice_argument :: proc(t: ^testing.T) {
     sum))
 
 (defn main []
-  (let [orders [(Order {amount: 120})
-                (Order {amount: 80})] :defer]
+  (let [orders [(Order :amount 120)
+                (Order :amount 80)] :defer]
     (println (total orders))))`
 
     output, err, ok := kvist.compile_source(source)
@@ -68,10 +68,10 @@ reject_returning_threaded_view_of_owned_intermediate :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")
 
-(defstruct User {
+(defstruct User [
   name: string
   active: bool
-})
+])
 
 (defn bad [users: []User] -> []string
   (let [active-names (->> users
@@ -256,14 +256,14 @@ compile_warns_for_borrowed_value_escaping_in_returned_composite :: proc(t: ^test
     source := `(package main)
 (import arr "kvist:arr")
 
-(defstruct ViewBox {
+(defstruct ViewBox [
   view: []int
-})
+])
 
 (defn bad-view [] -> ViewBox
   (let [xs (arr.range 0 10) :defer
         view (arr.slice xs 0 3)]
-    (ViewBox {view: view})))`
+    (ViewBox :view view)))`
 
     result, err, ok := kvist.compile_source_with_map(source)
     testing.expect_value(t, ok, true)
@@ -415,18 +415,18 @@ compile_warns_for_third_party_type_case_borrowed_assignment_escaping_owner :: pr
 (import arr "kvist:arr")
 (import support "support")
 
-(defstruct Connected {
+(defstruct Connected [
   id: int
-})
+])
 
-(defstruct Disconnected {
+(defstruct Disconnected [
   reason: string
-})
+])
 
-(defunion Event {
+(defunion Event [
   connected: Connected
   disconnected: Disconnected
-})
+])
 
 (defn bad-view [event: Event] -> []int
   (let [xs (arr.range 0 10) :defer

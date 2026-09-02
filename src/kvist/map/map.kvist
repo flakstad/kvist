@@ -45,7 +45,7 @@
   [m]
   `(transform-loop [key value ~m]
      (map.entry key value)
-     {key: key value: value}))
+     :key key :value value))
 
 (defmacro merge!
   "Mutate `target` by assigning every entry from `source`.

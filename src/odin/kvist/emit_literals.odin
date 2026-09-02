@@ -33,14 +33,21 @@ emit_brace_pair_texts :: proc(e: ^Emitter, form: CST_Form, keyword_fields := tru
 
         #partial switch key.kind {
         case .Keyword:
-            append(&pairs, Brace_Pair{key = keyword_literal_text(e, key.text), value = value_text})
+            if keyword_fields {
+                field_name, ok_field := brace_key_name(key)
+                if !ok_field {
+                    return pairs, Compile_Error{message = "aggregate field keys must be unqualified keywords such as :name", span = key.span}, false
+                }
+                append(&pairs, Brace_Pair{key = field_name, value = value_text})
+            } else {
+                append(&pairs, Brace_Pair{key = keyword_literal_text(e, key.text), value = value_text})
+            }
         case .Symbol:
             if len(key.text) > 1 && key.text[len(key.text)-1] == ':' {
-                if keyword_fields {
-                    append(&pairs, Brace_Pair{key = map_name(key.text[:len(key.text)-1]), value = value_text})
-                    i += 2
-                    continue
-                }
+                return pairs, Compile_Error{
+                    message = "suffix `:` is reserved for type annotations; use a keyword key such as :name",
+                    span = key.span,
+                }, false
             }
             key_text: string
             err_key: Compile_Error
@@ -178,7 +185,8 @@ brace_form_starts_with_field_label :: proc(form: CST_Form) -> bool {
         return true
     }
     first := form.items[0]
-    return first.kind == .Symbol && len(first.text) > 1 && first.text[len(first.text)-1] == ':'
+    _, ok := brace_key_name(first)
+    return ok
 }
 
 has_multiline_items :: proc(items: []string) -> bool {
@@ -308,56 +316,134 @@ emit_brace_literal :: proc(e: ^Emitter, prefix: string, form: CST_Form) -> (stri
     return strings.clone(strings.to_string(builder)), {}, true
 }
 
-emit_struct_brace_literal :: proc(e: ^Emitter, struct_decl: ^Struct_Decl, form: CST_Form) -> (string, Compile_Error, bool) {
-    if form.kind != .Brace {
-        return "", Compile_Error{message = "struct construction expects a brace form", span = form.span}, false
+emit_struct_field_value_text :: proc(e: ^Emitter, field: Struct_Field, value: CST_Form) -> (string, Compile_Error, bool) {
+    if (value.kind == .String || value.kind == .Regex || value.kind == .Bool || value.kind == .Number) &&
+       type_text_is_builtin_odin_scalar(field.ty) &&
+       !form_obviously_matches_expected_type(e, value, field.ty) {
+        source_name := field.source_name
+        if source_name == "" {
+            source_name = field.name
+        }
+        return "", Compile_Error{
+            message = fmt.tprintf("struct constructor literal type mismatch for :%s", source_name),
+            span = value.span,
+        }, false
+    }
+    value_text, err_value, ok_value := emit_expr_for_expected_type(e, value, field.ty)
+    if !ok_value {
+        return "", err_value, false
+    }
+    moved_local := false
+    if value.kind == .Symbol && ownership_type_has_destructor(e, field.ty) {
+        name := map_name(value.text)
+        if owner_flag, ok_owner := lookup_managed_local_owner(e, name); ok_owner {
+            value_text = managed_move_local_value_text(e, field.ty, value_text, owner_flag)
+            moved_local = true
+        }
+        delete(name)
+    } else if owner_name, has_owner := form_direct_borrow_owner_name(value, e); has_owner {
+        if owner_flag, ok_owner := lookup_managed_local_owner(e, owner_name); ok_owner {
+            value_text = managed_move_local_value_text(e, field.ty, value_text, owner_flag)
+            moved_local = true
+        }
+        delete(owner_name)
+    }
+    if field.owns_string {
+        if !form_produces_owned_value(value, e) {
+            mark_core_strings(e)
+            value_text = emit_call_text("strings.clone", []string{value_text})
+        }
+    } else if !field.owns_dynamic_array &&
+       type_text_has_managed_lifecycle(e, field.ty) &&
+       !moved_local &&
+       !form_produces_owned_managed_type(e, value, field.ty) {
+        value_text = managed_clone_value_text(e, field.ty, value_text)
+    }
+    return value_text, {}, true
+}
+
+emit_struct_pairs_literal :: proc(type_name: string, pairs: []Brace_Pair, include_field_names := true) -> string {
+    multiline := false
+    for pair in pairs {
+        if contains_newline(pair.value) {
+            multiline = true
+            break
+        }
+    }
+    if !multiline {
+        builder := strings.builder_make()
+        defer strings.builder_destroy(&builder)
+        strings.write_string(&builder, type_name)
+        strings.write_byte(&builder, '{')
+        for pair, idx in pairs {
+            if idx > 0 {
+                strings.write_string(&builder, ", ")
+            }
+            if include_field_names {
+                fmt.sbprintf(&builder, "%s = %s", pair.key, pair.value)
+            } else {
+                strings.write_string(&builder, pair.value)
+            }
+        }
+        strings.write_byte(&builder, '}')
+        return strings.clone(strings.to_string(builder))
+    }
+
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    strings.write_string(&builder, type_name)
+    strings.write_string(&builder, "{\n")
+    for pair in pairs {
+        item := pair.value
+        if include_field_names {
+            item = fmt.tprintf("%s = %s", pair.key, pair.value)
+        }
+        append_indented_multiline(&builder, item, "    ", ",")
+        strings.write_byte(&builder, '\n')
+    }
+    strings.write_byte(&builder, '}')
+    return strings.clone(strings.to_string(builder))
+}
+
+struct_args_use_named_fields :: proc(args: []CST_Form) -> bool {
+    return keyword_arg_tail_is_syntax(args, 0)
+}
+
+imported_struct_args_use_named_fields :: proc(args: []CST_Form) -> bool {
+    return keyword_arg_tail_is_syntax(args, 0)
+}
+
+emit_struct_named_literal :: proc(e: ^Emitter, struct_decl: ^Struct_Decl, named_args: []CST_Form, span: Span) -> (string, Compile_Error, bool) {
+    if len(named_args) == 0 || len(named_args)%2 != 0 {
+        return "", Compile_Error{message = "named struct construction uses alternating :field value pairs", span = span}, false
     }
 
     pairs: [dynamic]Brace_Pair
+    seen: [dynamic]string
     i := 0
-    for i < len(form.items) {
-        if i+1 >= len(form.items) {
-            return "", Compile_Error{message = "missing struct constructor value", span = form.span}, false
+    for i < len(named_args) {
+        if i+1 >= len(named_args) {
+            return "", Compile_Error{message = "missing struct constructor value", span = span}, false
         }
-        key := form.items[i]
-        value := form.items[i+1]
+        key := named_args[i]
+        value := named_args[i+1]
         field_name, ok_key := brace_key_name(key)
         if !ok_key {
-            return "", Compile_Error{message = "struct construction expects field: labels", span = key.span}, false
+            return "", Compile_Error{message = "named struct construction uses alternating keyword/value pairs such as :name value", span = key.span}, false
         }
         field, ok_field := find_struct_field(struct_decl, field_name)
         if !ok_field {
             return "", Compile_Error{message = fmt.tprintf("unknown struct constructor field %s", key.text), span = key.span}, false
         }
-        value_text, err_value, ok_value := emit_expr_for_expected_type(e, value, field.ty)
+        for existing in seen {
+            if existing == field_name {
+                return "", Compile_Error{message = fmt.tprintf("duplicate struct constructor field %s", key.text), span = key.span}, false
+            }
+        }
+        append(&seen, field_name)
+        value_text, err_value, ok_value := emit_struct_field_value_text(e, field^, value)
         if !ok_value {
             return "", err_value, false
-        }
-        moved_local := false
-        if value.kind == .Symbol && ownership_type_has_destructor(e, field.ty) {
-            name := map_name(value.text)
-            if owner_flag, ok_owner := lookup_managed_local_owner(e, name); ok_owner {
-                value_text = managed_move_local_value_text(e, field.ty, value_text, owner_flag)
-                moved_local = true
-            }
-            delete(name)
-        } else if owner_name, has_owner := form_direct_borrow_owner_name(value, e); has_owner {
-            if owner_flag, ok_owner := lookup_managed_local_owner(e, owner_name); ok_owner {
-                value_text = managed_move_local_value_text(e, field.ty, value_text, owner_flag)
-                moved_local = true
-            }
-            delete(owner_name)
-        }
-        if field.owns_string {
-            if !form_produces_owned_value(value, e) {
-                mark_core_strings(e)
-                value_text = emit_call_text("strings.clone", []string{value_text})
-            }
-        } else if !field.owns_dynamic_array &&
-           type_text_has_managed_lifecycle(e, field.ty) &&
-           !moved_local &&
-           !form_produces_owned_managed_type(e, value, field.ty) {
-            value_text = managed_clone_value_text(e, field.ty, value_text)
         }
         append(&pairs, Brace_Pair{key = field_name, value = value_text})
         i += 2
@@ -383,65 +469,65 @@ emit_struct_brace_literal :: proc(e: ^Emitter, struct_decl: ^Struct_Decl, form: 
         append(&pairs, Brace_Pair{key = field.name, value = default_text})
     }
 
-    multiline := false
-    for pair in pairs {
-        if contains_newline(pair.value) {
-            multiline = true
-            break
-        }
-    }
-    if !multiline {
-        builder := strings.builder_make()
-        defer strings.builder_destroy(&builder)
-        strings.write_string(&builder, struct_decl.name)
-        strings.write_byte(&builder, '{')
-        for pair, idx in pairs {
-            if idx > 0 {
-                strings.write_string(&builder, ", ")
-            }
-            fmt.sbprintf(&builder, "%s = %s", pair.key, pair.value)
-        }
-        strings.write_byte(&builder, '}')
-        return strings.clone(strings.to_string(builder)), Compile_Error{}, true
-    }
-
-    builder := strings.builder_make()
-    defer strings.builder_destroy(&builder)
-    strings.write_string(&builder, struct_decl.name)
-    strings.write_string(&builder, "{\n")
-    for pair in pairs {
-        append_indented_multiline(&builder, fmt.tprintf("%s = %s", pair.key, pair.value), "    ", ",")
-        strings.write_byte(&builder, '\n')
-    }
-    strings.write_byte(&builder, '}')
-    return strings.clone(strings.to_string(builder)), Compile_Error{}, true
+    return emit_struct_pairs_literal(struct_decl.name, pairs[:]), {}, true
 }
 
-emit_imported_struct_brace_literal :: proc(e: ^Emitter, type_text: string, fields: []Struct_Field, form: CST_Form) -> (string, Compile_Error, bool) {
-    if form.kind != .Brace {
-        return "", Compile_Error{message = "struct construction expects a brace form", span = form.span}, false
+emit_struct_positional_literal :: proc(e: ^Emitter, struct_decl: ^Struct_Decl, values: []CST_Form, span: Span) -> (string, Compile_Error, bool) {
+    if len(values) > len(struct_decl.fields) {
+        return "", Compile_Error{message = fmt.tprintf("%s expects at most %d positional fields", struct_decl.name, len(struct_decl.fields)), span = span}, false
     }
-    if !brace_form_starts_with_field_label(form) {
-        return "", Compile_Error{message = "positional aggregate literals use vector syntax", span = form.span}, false
+    pairs: [dynamic]Brace_Pair
+    for value, idx in values {
+        field := struct_decl.fields[idx]
+        value_text, err_value, ok_value := emit_struct_field_value_text(e, field, value)
+        if !ok_value {
+            return "", err_value, false
+        }
+        append(&pairs, Brace_Pair{key = field.name, value = value_text})
+    }
+    for idx := len(values); idx < len(struct_decl.fields); idx += 1 {
+        field := struct_decl.fields[idx]
+        if !field.has_default {
+            continue
+        }
+        default_text, err_default, ok_default := emit_struct_field_default(e, field)
+        if !ok_default {
+            return "", err_default, false
+        }
+        append(&pairs, Brace_Pair{key = field.name, value = default_text})
+    }
+    return emit_struct_pairs_literal(struct_decl.name, pairs[:], false), {}, true
+}
+
+emit_imported_struct_named_literal :: proc(e: ^Emitter, type_text: string, fields: []Struct_Field, named_args: []CST_Form, span: Span) -> (string, Compile_Error, bool) {
+    if len(named_args) == 0 || len(named_args)%2 != 0 {
+        return "", Compile_Error{message = "named struct construction uses alternating :field value pairs", span = span}, false
     }
 
     pairs: [dynamic]Brace_Pair
+    seen: [dynamic]string
     i := 0
-    for i < len(form.items) {
-        if i+1 >= len(form.items) {
-            return "", Compile_Error{message = "missing struct constructor value", span = form.span}, false
+    for i < len(named_args) {
+        if i+1 >= len(named_args) {
+            return "", Compile_Error{message = "missing struct constructor value", span = span}, false
         }
-        key := form.items[i]
-        value := form.items[i+1]
+        key := named_args[i]
+        value := named_args[i+1]
         field_name, ok_key := brace_key_name(key)
         if !ok_key {
-            return "", Compile_Error{message = "struct construction expects field: labels", span = key.span}, false
+            return "", Compile_Error{message = "named struct construction uses alternating keyword/value pairs such as :name value", span = key.span}, false
         }
         field, ok_field := find_field_in_slice(fields, field_name)
         if !ok_field {
             return "", Compile_Error{message = fmt.tprintf("unknown struct constructor field %s", key.text), span = key.span}, false
         }
-        value_text, err_value, ok_value := emit_expr_for_expected_type(e, value, field.ty)
+        for existing in seen {
+            if existing == field_name {
+                return "", Compile_Error{message = fmt.tprintf("duplicate struct constructor field %s", key.text), span = key.span}, false
+            }
+        }
+        append(&seen, field_name)
+        value_text, err_value, ok_value := emit_struct_field_value_text(e, field^, value)
         if !ok_value {
             return "", err_value, false
         }
@@ -449,38 +535,23 @@ emit_imported_struct_brace_literal :: proc(e: ^Emitter, type_text: string, field
         i += 2
     }
 
-    multiline := false
-    for pair in pairs {
-        if contains_newline(pair.value) {
-            multiline = true
-            break
-        }
-    }
-    if !multiline {
-        builder := strings.builder_make()
-        defer strings.builder_destroy(&builder)
-        strings.write_string(&builder, type_text)
-        strings.write_byte(&builder, '{')
-        for pair, idx in pairs {
-            if idx > 0 {
-                strings.write_string(&builder, ", ")
-            }
-            fmt.sbprintf(&builder, "%s = %s", pair.key, pair.value)
-        }
-        strings.write_byte(&builder, '}')
-        return strings.clone(strings.to_string(builder)), Compile_Error{}, true
-    }
+    return emit_struct_pairs_literal(type_text, pairs[:]), {}, true
+}
 
-    builder := strings.builder_make()
-    defer strings.builder_destroy(&builder)
-    strings.write_string(&builder, type_text)
-    strings.write_string(&builder, "{\n")
-    for pair in pairs {
-        append_indented_multiline(&builder, fmt.tprintf("%s = %s", pair.key, pair.value), "    ", ",")
-        strings.write_byte(&builder, '\n')
+emit_imported_struct_positional_literal :: proc(e: ^Emitter, type_text: string, fields: []Struct_Field, values: []CST_Form, span: Span) -> (string, Compile_Error, bool) {
+    if len(values) > len(fields) {
+        return "", Compile_Error{message = fmt.tprintf("%s expects at most %d positional fields", type_text, len(fields)), span = span}, false
     }
-    strings.write_byte(&builder, '}')
-    return strings.clone(strings.to_string(builder)), Compile_Error{}, true
+    pairs: [dynamic]Brace_Pair
+    for value, idx in values {
+        field := fields[idx]
+        value_text, err_value, ok_value := emit_struct_field_value_text(e, field, value)
+        if !ok_value {
+            return "", err_value, false
+        }
+        append(&pairs, Brace_Pair{key = field.name, value = value_text})
+    }
+    return emit_struct_pairs_literal(type_text, pairs[:], false), {}, true
 }
 
 emit_call_text :: proc(name: string, arg_texts: []string) -> string {
@@ -654,13 +725,54 @@ call_arg_expected_type :: proc(e: ^Emitter, call: CST_Form, item_index: int) -> 
             return strings.clone("Data"), true
         }
     }
+    if struct_decl, ok_struct := find_struct_decl(e, head_name); ok_struct {
+        args := call.items[1:]
+        if struct_args_use_named_fields(args) {
+            if arg_index%2 == 1 {
+                field_name, ok_key := brace_key_name(args[arg_index-1])
+                if ok_key {
+                    if field, ok_field := find_struct_field(struct_decl, field_name); ok_field {
+                        return strings.clone(field.ty), true
+                    }
+                }
+            }
+            return "", false
+        }
+        if len(args) == 1 && args[0].kind == .Vector {
+            return strings.clone(head_name), true
+        }
+        if arg_index < len(struct_decl.fields) {
+            return strings.clone(struct_decl.fields[arg_index].ty), true
+        }
+        return "", false
+    }
+    if _, proc_decl, ok_proc := resolve_proc_call_decl(e, call.items[0].text); ok_proc && proc_decl != nil {
+        args := call.items[1:]
+        resolution := keyword_args_call_resolution(e, proc_decl, args)
+        if resolution.mode == .Named {
+            if arg_index < resolution.split && arg_index < len(proc_decl.params) {
+                return strings.clone(proc_decl.params[arg_index].ty), true
+            }
+            relative := arg_index-resolution.split
+            if relative >= 0 && relative%2 == 1 {
+                field_name, ok_key := brace_key_name(args[arg_index-1])
+                if ok_key {
+                    if param, ok_param := find_proc_param(proc_decl, field_name); ok_param {
+                        return strings.clone(param.ty), true
+                    }
+                }
+            }
+            return "", false
+        }
+        if resolution.mode == .Ambiguous {
+            return "", false
+        }
+        if arg_index < len(proc_decl.params) {
+            return strings.clone(proc_decl.params[arg_index].ty), true
+        }
+    }
     if expected_type, ok_expected := overload_literal_arg_expected_type(e, head_name, call.items[1:], arg_index); ok_expected {
         return expected_type, true
-    }
-    if _, proc_decl, ok_proc := resolve_proc_call_decl(e, call.items[0].text); ok_proc &&
-       proc_decl != nil &&
-       arg_index < len(proc_decl.params) {
-        return strings.clone(proc_decl.params[arg_index].ty), true
     }
     return "", false
 }
@@ -882,22 +994,22 @@ resolve_proc_call_decl :: proc(e: ^Emitter, head: string) -> (call_name: string,
     return head_name, nil, false
 }
 
-emit_named_call_arg_texts :: proc(e: ^Emitter, form: CST_Form) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
-    if form.kind != .Brace {
-        return arg_texts, Compile_Error{message = "named arguments expect a brace form", span = form.span}, false
+emit_named_call_arg_texts :: proc(e: ^Emitter, named_args: []CST_Form, span: Span) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
+    if len(named_args) == 0 || len(named_args)%2 != 0 {
+        return arg_texts, Compile_Error{message = "named arguments use alternating :name value pairs", span = span}, false
     }
 
     seen: [dynamic]string
-    for i := 0; i < len(form.items); i += 2 {
-        if i+1 >= len(form.items) {
-            return arg_texts, Compile_Error{message = "missing named argument value", span = form.span}, false
+    for i := 0; i < len(named_args); i += 2 {
+        if i+1 >= len(named_args) {
+            return arg_texts, Compile_Error{message = "missing named argument value", span = span}, false
         }
 
-        key := form.items[i]
-        value := form.items[i+1]
+        key := named_args[i]
+        value := named_args[i+1]
         field_name, ok_key := brace_key_name(key)
         if !ok_key {
-            return arg_texts, Compile_Error{message = "named arguments expect field: labels", span = key.span}, false
+            return arg_texts, Compile_Error{message = "named arguments use alternating keyword/value pairs such as :name value", span = key.span}, false
         }
         for existing in seen {
             if existing == field_name {

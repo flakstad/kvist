@@ -1286,7 +1286,7 @@ compile_repl_pointer_result_reports_unretained_lifecycle :: proc(
 compile_repl_nominal_definition_emits_layout_abi :: proc(t: ^testing.T) {
     result, err, ok := kvist.compile_eval_path_with_map(
         "examples/collections/higher-order.kvist",
-        "(defstruct Layout-Point {x: int label: string})",
+        "(defstruct Layout-Point [x: int label: string])",
         repl_generation = true,
     )
     testing.expect_value(t, ok, true)
@@ -1473,7 +1473,7 @@ compile_repl_generation_emits_nested_debug_safe_point :: proc(t: ^testing.T) {
 
     struct_result, struct_err, struct_ok := kvist.compile_eval_path_with_map(
         "examples/collections/higher-order.kvist",
-        `(defstruct DebugPair {left: int right: bool})
+        `(defstruct DebugPair [left: int right: bool])
 (defn paused-pair [pair: DebugPair] -> int (do (kvist-intrinsic-breakpoint) pair.left))`,
         repl_generation = true,
     )
@@ -1519,8 +1519,8 @@ compile_repl_generation_emits_nested_debug_safe_point :: proc(t: ^testing.T) {
 
     nested_result, nested_err, nested_ok := kvist.compile_eval_path_with_map(
         "examples/collections/higher-order.kvist",
-        `(defstruct DebugPosition {line: int})
-(defstruct DebugState {position: DebugPosition active: bool})
+        `(defstruct DebugPosition [line: int])
+(defstruct DebugState [position: DebugPosition active: bool])
 (defn paused-state [state: DebugState] -> int (do (kvist-intrinsic-breakpoint) state.position.line))`,
         repl_generation = true,
     )
@@ -1699,7 +1699,7 @@ compile_repl_generation_emits_nested_debug_safe_point :: proc(t: ^testing.T) {
     dynamic_struct_result, dynamic_struct_err, dynamic_struct_ok :=
         kvist.compile_eval_path_with_map(
             "examples/collections/higher-order.kvist",
-            `(defstruct DebugElement {line: int})
+            `(defstruct DebugElement [line: int])
 (defn paused-dynamic-struct [values: [dynamic]DebugElement] -> int
   (do (kvist-intrinsic-breakpoint) values[0].line))`,
             repl_generation = true,
@@ -1802,7 +1802,7 @@ compile_repl_generation_emits_nested_debug_safe_point :: proc(t: ^testing.T) {
     map_struct_result, map_struct_err, map_struct_ok :=
         kvist.compile_eval_path_with_map(
             "examples/collections/higher-order.kvist",
-            `(defstruct DebugMapValue {line: int})
+            `(defstruct DebugMapValue [line: int])
 (defn paused-map-struct [values: map[string]DebugMapValue] -> int
   (do (kvist-intrinsic-breakpoint) values["alice"].line))`,
             repl_generation = true,
@@ -1846,12 +1846,12 @@ compile_repl_generation_emits_nested_debug_safe_point :: proc(t: ^testing.T) {
         nested_collection_ok :=
         kvist.compile_eval_path_with_map(
             "examples/collections/higher-order.kvist",
-            `(defstruct DebugCollections {
+            `(defstruct DebugCollections [
   id: int
   history: [dynamic]int
   labels: map[string]int
   buckets: [2][dynamic]int
-})
+])
 (defn paused-collections [state: DebugCollections] -> int
   (do (kvist-intrinsic-breakpoint) state.id))`,
             repl_generation = true,
@@ -2809,9 +2809,9 @@ compile_repl_generation_promotes_deferred_array_slice_result :: proc(t: ^testing
 compile_repl_generation_promotes_nested_borrowed_slice_result :: proc(t: ^testing.T) {
     result, err, ok := kvist.compile_eval_path_with_map(
         "examples/language/hello.kvist",
-        `(defstruct Repl-Window {values: []int})
+        `(defstruct Repl-Window [values: []int])
          (let [owner ([dynamic]int [3 4 5]) :defer]
-           (Repl-Window {values: (odin-slice owner 1)}))`,
+           (Repl-Window :values (odin-slice owner 1)))`,
         repl_generation = true,
     )
     testing.expect_value(t, ok, true)
@@ -2853,10 +2853,10 @@ compile_repl_generation_promotes_nested_borrowed_slice_result :: proc(t: ^testin
 compile_repl_generation_promotes_nested_borrowed_slice_definition :: proc(t: ^testing.T) {
     result, err, ok := kvist.compile_eval_path_with_map(
         "examples/language/hello.kvist",
-        `(defstruct Retained-Window {values: []int})
+        `(defstruct Retained-Window [values: []int])
          (def retained-window: Retained-Window
            (let [owner ([dynamic]int [6 7 8]) :defer]
-             (Retained-Window {values: (odin-slice owner 1)})))`,
+             (Retained-Window :values (odin-slice owner 1))))`,
         repl_generation = true,
     )
     testing.expect_value(t, ok, true)
@@ -3464,8 +3464,8 @@ compile_repl_generation_uses_type_correct_zero_values :: proc(t: ^testing.T) {
 
     source := `(package repl_zero_values)
 
-(defstruct Entry {value: int})
-(defunion Choice {entry: Entry number: int})
+(defstruct Entry [value: int])
+(defunion Choice [entry: Entry number: int])
 (def Entry-Pointer ^Entry)
 (def Nested-Entry-Pointer Entry-Pointer)
 (def Distinct-Entry-Pointer (distinct ^Entry))
@@ -3560,7 +3560,7 @@ cli_repl_accepts_pointer_returns_from_context_and_imported_packages :: proc(
     state_source := `(package state)
 (import arr "kvist:arr")
 
-(defstruct Imported-Entry {value: int})
+(defstruct Imported-Entry [value: int])
 (def Imported-Entry-Pointer ^Imported-Entry)
 (defn imported-identity [entry: Imported-Entry-Pointer] -> Imported-Entry-Pointer entry)
 
@@ -3582,8 +3582,8 @@ cli_repl_accepts_pointer_returns_from_context_and_imported_packages :: proc(
     defer delete(context_path)
     context_source := `(package repl_pointer_zero)
 (import state "./state")
-(defstruct Entry {value: int})
-(defunion Choice {entry: Entry number: int})
+(defstruct Entry [value: int])
+(defunion Choice [entry: Entry number: int])
 (def Entry-Pointer ^Entry)
 (def Nested-Entry-Pointer Entry-Pointer)
 (def Distinct-Entry-Pointer (distinct ^Entry))
@@ -5062,7 +5062,7 @@ cli_repl_reuses_loaded_native_expressions_across_intervening_evals :: proc(
     )
     requests_path, _ := os.join_path({dir, "requests.jsonl"}, context.allocator)
     defer delete(requests_path)
-    requests := `{"id":"define","op":"eval","source":"(import data \"kvist:data\")\n(defvar reuse-count: int 0)\n(defvar reuse-data-count: i64 0)\n(defn reuse-bump [] -> int (do (inc! reuse-count) reuse-count))\n(defn reuse-data-bump [] -> i64 (do (inc! reuse-data-count) reuse-data-count))\n(defn reuse-native [x: int y: int = 0] -> int (+ x y))","defer_debug_values":true}
+    requests := `{"id":"define","op":"eval","source":"(import data \"kvist:data\")\n(defvar reuse-count: int 0)\n(defvar reuse-data-count: i64 0)\n(defn reuse-bump [] -> int (do (inc! reuse-count) reuse-count))\n(defn reuse-data-bump [] -> i64 (do (inc! reuse-data-count) reuse-data-count))\n(defn reuse-native [x: int y: int :default 0] -> int (+ x y))","defer_debug_values":true}
 {"id":"first","op":"eval","source":"(reuse-native (reuse-bump))"}
 {"id":"repeat","op":"eval","source":"(reuse-native (reuse-bump))"}
 {"id":"third","op":"eval","source":"(reuse-native (reuse-bump))"}
@@ -6919,9 +6919,9 @@ cli_repl_jsonl_executes_native_multi_form_generation :: proc(t: ^testing.T) {
 {"id":"mutate-string","op":"eval","source":"(set! label \"two\")\n(read-label)"}
 {"id":"redef-mutable-string","op":"eval","source":"(defvar label: string \"three\")"}
 {"id":"read-redefined-string","op":"eval","source":"(read-label)"}
-{"id":"def-aggregate-buffer","op":"eval","source":"(defstruct Repl-Point {x: int y: int})\n(defvar repl-point: Repl-Point (Repl-Point {x: 1 y: 2}))\n(defn move-old-point [n: int] -> int (do (set! repl-point.x (+ repl-point.x n)) repl-point.x))"}
+{"id":"def-aggregate-buffer","op":"eval","source":"(defstruct Repl-Point [x: int y: int])\n(defvar repl-point: Repl-Point (Repl-Point :x 1 :y 2))\n(defn move-old-point [n: int] -> int (do (set! repl-point.x (+ repl-point.x n)) repl-point.x))"}
 {"id":"mutate-old-layout","op":"eval","source":"(move-old-point 5)"}
-{"id":"redef-aggregate-layout","op":"eval","source":"(defstruct Repl-Point {x: int y: int z: int})\n(defvar repl-point: Repl-Point (Repl-Point {x: 10 y: 20 z: 30}))"}
+{"id":"redef-aggregate-layout","op":"eval","source":"(defstruct Repl-Point [x: int y: int z: int])\n(defvar repl-point: Repl-Point (Repl-Point :x 10 :y 20 :z 30))"}
 {"id":"read-new-layout","op":"eval","source":"repl-point.z"}
 {"id":"mutate-retained-old-layout","op":"eval","source":"(move-old-point 1)"}
 {"id":"read-new-layout-after-old-mutation","op":"eval","source":"repl-point.x"}
@@ -6930,7 +6930,7 @@ cli_repl_jsonl_executes_native_multi_form_generation :: proc(t: ^testing.T) {
 {"id":"redef-session-transform","op":"eval","source":"(deftransform repl-transform (map repl-times-ten))\n(defn collect-new-transform [xs: [2]int] -> [dynamic]int (into [dynamic]int repl-transform xs))"}
 {"id":"call-new-session-transform","op":"eval","source":"(collect-new-transform ([2]int [1 2]))"}
 {"id":"call-retained-old-transform","op":"eval","source":"(collect-old-transform ([2]int [1 2]))"}
-{"id":"def-session-iterator","op":"eval","source":"(defstruct Repl-Source {values: [2]int index: int})\n(defn repl-open-source [values: [2]int] -> Repl-Source (Repl-Source {values: values index: 0}))\n(defn repl-next-source [src: ^Repl-Source] -> [value: int ok: bool] (if (< src.index 2) (let [value src.values[src.index]] (inc! src.index) (return value true)) (return 0 false)))\n(defiter repl-items [values: [2]int] -> Repl-Source :yield int :next repl-next-source (repl-open-source values))"}
+{"id":"def-session-iterator","op":"eval","source":"(defstruct Repl-Source [values: [2]int index: int])\n(defn repl-open-source [values: [2]int] -> Repl-Source (Repl-Source :values values :index 0))\n(defn repl-next-source [src: ^Repl-Source] -> [value: int ok: bool] (if (< src.index 2) (let [value src.values[src.index]] (inc! src.index) (return value true)) (return 0 false)))\n(defiter repl-items [values: [2]int] -> Repl-Source :yield int :next repl-next-source (repl-open-source values))"}
 {"id":"def-session-iterator-user","op":"eval","source":"(defn sum-repl-items [values: [2]int] -> int (let [total 0] (for [value (repl-items values)] (set! total (+ total value))) total))"}
 {"id":"call-session-iterator","op":"eval","source":"(sum-repl-items ([2]int [3 4]))"}
 {"id":"def-dependency-pair","op":"eval","source":"(defn dep-foo [x: int] -> int (+ x 1))\n(defn dep-middle [x: int] -> int (int (dep-foo x)))\n(defn dep-caller [x: int] -> string (str (dep-middle x)))"}
@@ -7034,8 +7034,8 @@ cli_repl_jsonl_executes_native_multi_form_generation :: proc(t: ^testing.T) {
 {"id":"step-nested-pause","op":"debug-step"}
 {"id":"stepped-frame","op":"debug-frame"}
 {"id":"continue-nested-pause","op":"debug-continue"}
-{"id":"def-struct-pause","op":"eval","source":"(defstruct DebugCursor {line: int})\n(defstruct DebugPair {left: int right: bool cursor: DebugCursor samples: [2]int})\n(defn paused-pair [pair: DebugPair values: [dynamic]int points: [dynamic]DebugCursor scores: map[string]int] -> int (do (kvist-intrinsic-breakpoint) pair.left))","source_path":"/virtual/editor.kvist","line":130,"column":1}
-{"id":"call-struct-pause","op":"eval","source":"(paused-pair (DebugPair {left: 7 right: true cursor: (DebugCursor {line: 31}) samples: [11 13]}) ([dynamic]int [17 19 23 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64]) ([dynamic]DebugCursor [(DebugCursor {line: 41}) (DebugCursor {line: 43}) (DebugCursor {line: 47})]) (map[string]int {\"zoe\" 9 \"alice\" 7 \"bob\" 8}))","source_path":"/virtual/editor.kvist","line":140,"column":1}
+{"id":"def-struct-pause","op":"eval","source":"(defstruct DebugCursor [line: int])\n(defstruct DebugPair [left: int right: bool cursor: DebugCursor samples: [2]int])\n(defn paused-pair [pair: DebugPair values: [dynamic]int points: [dynamic]DebugCursor scores: map[string]int] -> int (do (kvist-intrinsic-breakpoint) pair.left))","source_path":"/virtual/editor.kvist","line":130,"column":1}
+{"id":"call-struct-pause","op":"eval","source":"(paused-pair (DebugPair :left 7 :right true :cursor (DebugCursor :line 31) :samples [11 13]) ([dynamic]int [17 19 23 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64]) ([dynamic]DebugCursor [(DebugCursor :line 41) (DebugCursor :line 43) (DebugCursor :line 47)]) (map[string]int {\"zoe\" 9 \"alice\" 7 \"bob\" 8}))","source_path":"/virtual/editor.kvist","line":140,"column":1}
 {"id":"eval-struct-field","op":"debug-eval","source":"pair.left"}
 {"id":"eval-struct-bool","op":"debug-eval","source":"pair.right"}
 {"id":"eval-struct-expression","op":"debug-eval","source":"(+ pair.left 8)"}
@@ -7057,8 +7057,8 @@ cli_repl_jsonl_executes_native_multi_form_generation :: proc(t: ^testing.T) {
 {"id":"reject-fixed-array-uncaptured-index","op":"debug-eval","source":"pair.samples[9]"}
 {"id":"struct-frame","op":"debug-frame"}
 {"id":"continue-struct-pause","op":"debug-continue"}
-{"id":"def-nested-collection-pause","op":"eval","source":"(defstruct NestedItem {events: [dynamic]int tags: map[string]int})\n(defstruct NestedState {id: int history: [dynamic]int labels: map[string]int buckets: [2][dynamic]int groups: [dynamic]NestedItem users: map[string]NestedItem})\n(defn paused-nested-collections [snapshot: NestedState] -> int (do (kvist-intrinsic-breakpoint) snapshot.id))","source_path":"/virtual/editor.kvist","line":160,"column":1}
-{"id":"call-nested-collection-pause","op":"eval","source":"(paused-nested-collections (NestedState {id: 4 history: ([dynamic]int [10 20 30 40]) labels: (map[string]int {\"z\" 9 \"a\" 1 \"m\" 5}) buckets: ([2][dynamic]int [([dynamic]int [1 2]) ([dynamic]int [7 8 9])]) groups: ([dynamic]NestedItem [(NestedItem {events: ([dynamic]int [2 3]) tags: (map[string]int {\"first\" 1})}) (NestedItem {events: ([dynamic]int [11 12 13]) tags: (map[string]int {\"z\" 9 \"a\" 4})})]) users: (map[string]NestedItem {\"bob\" (NestedItem {events: ([dynamic]int [5]) tags: (map[string]int {\"b\" 2})}) \"alice\" (NestedItem {events: ([dynamic]int [21 22 23]) tags: (map[string]int {\"z\" 8 \"a\" 6})})})}))","source_path":"/virtual/editor.kvist","line":170,"column":1}
+{"id":"def-nested-collection-pause","op":"eval","source":"(defstruct NestedItem [events: [dynamic]int tags: map[string]int])\n(defstruct NestedState [id: int history: [dynamic]int labels: map[string]int buckets: [2][dynamic]int groups: [dynamic]NestedItem users: map[string]NestedItem])\n(defn paused-nested-collections [snapshot: NestedState] -> int (do (kvist-intrinsic-breakpoint) snapshot.id))","source_path":"/virtual/editor.kvist","line":160,"column":1}
+{"id":"call-nested-collection-pause","op":"eval","source":"(paused-nested-collections (NestedState :id 4 :history ([dynamic]int [10 20 30 40]) :labels (map[string]int {\"z\" 9 \"a\" 1 \"m\" 5}) :buckets ([2][dynamic]int [([dynamic]int [1 2]) ([dynamic]int [7 8 9])]) :groups ([dynamic]NestedItem [(NestedItem :events ([dynamic]int [2 3]) :tags (map[string]int {\"first\" 1})) (NestedItem :events ([dynamic]int [11 12 13]) :tags (map[string]int {\"z\" 9 \"a\" 4}))]) :users (map[string]NestedItem {\"bob\" (NestedItem :events ([dynamic]int [5]) :tags (map[string]int {\"b\" 2})) \"alice\" (NestedItem :events ([dynamic]int [21 22 23]) :tags (map[string]int {\"z\" 8 \"a\" 6}))})))","source_path":"/virtual/editor.kvist","line":170,"column":1}
 {"id":"page-nested-array","op":"debug-page","source":"snapshot.history","offset":2,"limit":2}
 {"id":"page-nested-map","op":"debug-page","source":"snapshot.labels","offset":0,"limit":2}
 {"id":"page-fixed-nested-array","op":"debug-page","source":"snapshot.buckets[1]","offset":1,"limit":2}
@@ -7078,10 +7078,10 @@ cli_repl_jsonl_executes_native_multi_form_generation :: proc(t: ^testing.T) {
 {"id":"bindings-empty","op":"bindings"}
 {"id":"generations-empty","op":"generations"}
 {"id":"debug-session-reset","op":"debug-session"}
-{"id":"def-default-proc","op":"eval","source":"(defn default-proc [x: int y: int = 2] -> int (+ x y))"}
+{"id":"def-default-proc","op":"eval","source":"(defn default-proc [x: int y: int :default 2] -> int (+ x y))"}
 {"id":"def-default-caller","op":"eval","source":"(defn default-caller [] -> int (default-proc 5))"}
 {"id":"call-default-v1","op":"eval","source":"(default-caller)"}
-{"id":"redef-default-proc","op":"eval","source":"(defn default-proc [x: int y: int = 20] -> int (+ x y))"}
+{"id":"redef-default-proc","op":"eval","source":"(defn default-proc [x: int y: int :default 20] -> int (+ x y))"}
 {"id":"call-default-v2","op":"eval","source":"(default-proc 5)"}
 {"id":"call-default-old-caller","op":"eval","source":"(default-caller)"}
 {"id":"def-custom-abi","op":"eval","source":"(defn custom-abi :abi \"c\" [x: int] -> int (+ x 1))"}
@@ -7092,9 +7092,9 @@ cli_repl_jsonl_executes_native_multi_form_generation :: proc(t: ^testing.T) {
 {"id":"call-generic-int","op":"eval","source":"(generic-id 11)"}
 {"id":"call-generic-string","op":"eval","source":"(generic-id \"generic\")"}
 {"id":"call-generic-constrained","op":"eval","source":"(generic-same? 7 7)"}
-{"id":"nested-retained-view","op":"eval","source":"(defstruct Retained-Window {values: []int})\n(let [owner ([dynamic]int [3 4 5]) :defer] (Retained-Window {values: (odin-slice owner 1)}))"}
+{"id":"nested-retained-view","op":"eval","source":"(defstruct Retained-Window [values: []int])\n(let [owner ([dynamic]int [3 4 5]) :defer] (Retained-Window :values (odin-slice owner 1)))"}
 {"id":"read-nested-retained-view","op":"eval","source":"(let [window *1] window.values[0])"}
-{"id":"define-nested-retained-view","op":"eval","source":"(def retained-window: Retained-Window (let [owner ([dynamic]int [6 7 8]) :defer] (Retained-Window {values: (odin-slice owner 1)})))"}
+{"id":"define-nested-retained-view","op":"eval","source":"(def retained-window: Retained-Window (let [owner ([dynamic]int [6 7 8]) :defer] (Retained-Window :values (odin-slice owner 1))))"}
 {"id":"read-defined-retained-view","op":"eval","source":"retained-window.values[0]"}
 {"id":"interrupt-pause","op":"eval","source":"(do (kvist-intrinsic-breakpoint) 99)"}
 {"id":"interrupt-active","op":"interrupt"}
@@ -7104,9 +7104,9 @@ cli_repl_jsonl_executes_native_multi_form_generation :: proc(t: ^testing.T) {
 {"id":"recover-deadline","op":"eval","source":"(+ 2 3)"}
 {"id":"separate-stderr","op":"eval","source":"(import fmt \"core:fmt\")\n(fmt.eprintln \"native-stderr\")","no_print":true}
 {"id":"unretained-pointer","op":"eval","source":"(defn pointer-result [] -> rawptr nil)\n(pointer-result)","source_path":"/virtual/pointer.kvist","line":7,"column":3}
-{"id":"history-layout-v1","op":"eval","source":"(defstruct History-Point {x: int})","source_path":"/virtual/history-v1.kvist","line":10,"column":1,"no_print":true}
-{"id":"inspect-history-v1","op":"inspect","source":"(History-Point {x: 7})"}
-{"id":"history-layout-v2","op":"eval","source":"(defstruct History-Point {x: int y: int})","source_path":"/virtual/history-v2.kvist","line":20,"column":1,"no_print":true}
+{"id":"history-layout-v1","op":"eval","source":"(defstruct History-Point [x: int])","source_path":"/virtual/history-v1.kvist","line":10,"column":1,"no_print":true}
+{"id":"inspect-history-v1","op":"inspect","source":"(History-Point :x 7)"}
+{"id":"history-layout-v2","op":"eval","source":"(defstruct History-Point [x: int y: int])","source_path":"/virtual/history-v2.kvist","line":20,"column":1,"no_print":true}
 {"id":"inspect-history-v1-cached","op":"inspect","handle":"inspection-1"}
 {"id":"allocations-1","op":"allocations"}
 {"id":"ownership-history-1","op":"ownership-history"}
@@ -7121,9 +7121,9 @@ cli_repl_jsonl_executes_native_multi_form_generation :: proc(t: ^testing.T) {
 {"id":"dedupe-def-1","op":"eval","source":"(defn unchanged-definition [x: int] -> int (+ x 1))"}
 {"id":"dedupe-def-2","op":"eval","source":"(defn unchanged-definition [x: int] -> int (+ x 1))"}
 {"id":"dedupe-versions","op":"versions","name":"unchanged-definition"}
-{"id":"iterator-v1","op":"eval","source":"(defstruct Live-Iterator-Source {values: [3]int index: int})\n(defn open-live-items [values: [3]int] -> Live-Iterator-Source (Live-Iterator-Source {values: values index: 0}))\n(defn next-live-item [source: ^Live-Iterator-Source] -> [value: int ok: bool] (if (< source.index 3) (let [value source.values[source.index]] (inc! source.index) (return value true)) (return 0 false)))\n(defiter live-items [values: [3]int] -> Live-Iterator-Source :yield int :next next-live-item (open-live-items values))\n(defn sum-live-items [values: [3]int] -> int (let [total 0] (for [value (live-items values)] (set! total (+ total value))) total))"}
+{"id":"iterator-v1","op":"eval","source":"(defstruct Live-Iterator-Source [values: [3]int index: int])\n(defn open-live-items [values: [3]int] -> Live-Iterator-Source (Live-Iterator-Source :values values :index 0))\n(defn next-live-item [source: ^Live-Iterator-Source] -> [value: int ok: bool] (if (< source.index 3) (let [value source.values[source.index]] (inc! source.index) (return value true)) (return 0 false)))\n(defiter live-items [values: [3]int] -> Live-Iterator-Source :yield int :next next-live-item (open-live-items values))\n(defn sum-live-items [values: [3]int] -> int (let [total 0] (for [value (live-items values)] (set! total (+ total value))) total))"}
 {"id":"iterator-old-call","op":"eval","source":"(sum-live-items ([3]int [1 2 3]))"}
-{"id":"iterator-v2","op":"eval","source":"(defstruct Live-Iterator-Source {values: [3]int index: int factor: int})\n(defn open-live-items [values: [3]int] -> Live-Iterator-Source (Live-Iterator-Source {values: values index: 0 factor: 2}))\n(defn next-live-item [source: ^Live-Iterator-Source] -> [value: int ok: bool] (if (< source.index 3) (let [value (* source.values[source.index] source.factor)] (inc! source.index) (return value true)) (return 0 false)))\n(defiter live-items [values: [3]int] -> Live-Iterator-Source :yield int :next next-live-item (open-live-items values))"}
+{"id":"iterator-v2","op":"eval","source":"(defstruct Live-Iterator-Source [values: [3]int index: int factor: int])\n(defn open-live-items [values: [3]int] -> Live-Iterator-Source (Live-Iterator-Source :values values :index 0 :factor 2))\n(defn next-live-item [source: ^Live-Iterator-Source] -> [value: int ok: bool] (if (< source.index 3) (let [value (* source.values[source.index] source.factor)] (inc! source.index) (return value true)) (return 0 false)))\n(defiter live-items [values: [3]int] -> Live-Iterator-Source :yield int :next next-live-item (open-live-items values))"}
 {"id":"iterator-retained-call","op":"eval","source":"(sum-live-items ([3]int [1 2 3]))"}
 {"id":"iterator-stale-dependents","op":"dependents","name":"live-items"}
 {"id":"iterator-refresh","op":"refresh-dependents","name":"live-items"}
@@ -8204,7 +8204,7 @@ cli_repl_pages_into_collections_beyond_eager_frame_window :: proc(
     defer strings.builder_destroy(&requests)
     strings.write_string(
         &requests,
-        "{\"id\":\"def\",\"op\":\"eval\",\"source\":\"(defstruct DeepItem {id: int events: [dynamic]int labels: map[string]int}) (defn pause-deep [items: [dynamic]DeepItem] -> int (do (kvist-intrinsic-breakpoint) items[0].id)) (defn pause-deep-map [mapped: map[string]DeepItem] -> int (do (kvist-intrinsic-breakpoint) mapped[\\\"k00\\\"].id))\"}\n",
+        "{\"id\":\"def\",\"op\":\"eval\",\"source\":\"(defstruct DeepItem [id: int events: [dynamic]int labels: map[string]int]) (defn pause-deep [items: [dynamic]DeepItem] -> int (do (kvist-intrinsic-breakpoint) items[0].id)) (defn pause-deep-map [mapped: map[string]DeepItem] -> int (do (kvist-intrinsic-breakpoint) mapped[\\\"k00\\\"].id))\"}\n",
     )
     strings.write_string(
         &requests,
@@ -8213,15 +8213,13 @@ cli_repl_pages_into_collections_beyond_eager_frame_window :: proc(
     for i in 0..<24 {
         fmt.sbprintf(
             &requests,
-            "(DeepItem %cid: %d events: ([dynamic]int [%d %d]) labels: (map[string]int %c\\\"a\\\" %d \\\"z\\\" %d%c)%c) ",
-            '{',
+            "(DeepItem :id %d :events ([dynamic]int [%d %d]) :labels (map[string]int %c\\\"a\\\" %d \\\"z\\\" %d%c)) ",
             i,
             i,
             i+100,
             '{',
             i,
             i+300,
-            '}',
             '}',
         )
     }
@@ -8253,16 +8251,14 @@ cli_repl_pages_into_collections_beyond_eager_frame_window :: proc(
     for i in 0..<24 {
         fmt.sbprintf(
             &requests,
-            "\\\"k%02d\\\" (DeepItem %cid: %d events: ([dynamic]int [%d %d]) labels: (map[string]int %c\\\"a\\\" %d \\\"z\\\" %d%c)%c) ",
+            "\\\"k%02d\\\" (DeepItem :id %d :events ([dynamic]int [%d %d]) :labels (map[string]int %c\\\"a\\\" %d \\\"z\\\" %d%c)) ",
             i,
-            '{',
             i,
             i,
             i+200,
             '{',
             i,
             i+400,
-            '}',
             '}',
         )
     }
@@ -8480,9 +8476,9 @@ repl_session_state_checkpoints :: proc(t: ^testing.T) {
 {"id":"missing","op":"checkpoint-restore","name":"baseline"}
 {"id":"managed-result","op":"eval","source":"([dynamic]int [7 8])","no_print":true}
 {"id":"physical-after-result","op":"physical-allocations"}
-{"id":"nested-managed-result","op":"eval","source":"(defstruct ManagedBox {label: string values: [dynamic]int})\n(ManagedBox {label: \"nested\" values: ([dynamic]int [4 5])})","no_print":true}
+{"id":"nested-managed-result","op":"eval","source":"(defstruct ManagedBox [label: string values: [dynamic]int])\n(ManagedBox :label \"nested\" :values ([dynamic]int [4 5]))","no_print":true}
 {"id":"physical-after-nested","op":"physical-allocations"}
-{"id":"nested-managed-array-result","op":"eval","source":"([dynamic]ManagedBox [(ManagedBox {label: \"inside\" values: ([dynamic]int [8 9])})])","no_print":true}
+{"id":"nested-managed-array-result","op":"eval","source":"([dynamic]ManagedBox [(ManagedBox :label \"inside\" :values ([dynamic]int [8 9]))])","no_print":true}
 {"id":"physical-after-nested-array","op":"physical-allocations"}
 {"id":"shared-data-result","op":"eval","source":"(let [answer 1] (quasiquote {:answer (unquote answer) :label \"shared\"}))","no_print":true}
 {"id":"physical-after-data","op":"physical-allocations"}
@@ -8845,11 +8841,11 @@ cli_repl_attach_proxies_olive_capabilities :: proc(t: ^testing.T) {
     strings.write_string(
         &requests,
 `{"id":"session","op":"attached-session"}
-{"id":"define","op":"eval","source":"(defn attached-add [x: int] -> int (+ x 2))\n(defn attached-output [x: int] -> int (do (println \"first\") (println x) (+ x 1)))\n(defn attached-paused [x: int] -> int (do (kvist-intrinsic-breakpoint) (+ x 3)))\n(defn attached-collection-pause [values: [dynamic]int scores: map[string]int] -> int (do (kvist-intrinsic-breakpoint) (+ values[0] scores[\"a\"])))\n(defn attached-repair [x: int] -> int (do (defvar value: int x) (kvist-intrinsic-use-value-restart nil nil value \"replace attached value\") value))\n(defn attached-condition [x: int] -> int (do (kvist-intrinsic-signal-condition nil nil :attached/invalid \"attached condition\" '{}) (+ x 1)))\n(defstruct AttachedPair {left: int right: string})\n(defn attached-traced [x: int] -> int (do (discard (+ x 1)) (+ x 2)))\n(defstruct AttachedDeepItem {id: int events: [dynamic]int labels: map[string]int})\n(defn attached-deep [items: [dynamic]AttachedDeepItem] -> int (do (kvist-intrinsic-breakpoint) items[0].id))\n(defn attached-deep-map [mapped: map[string]AttachedDeepItem] -> int (do (kvist-intrinsic-breakpoint) mapped[\"k00\"].id))\n(defvar attached-counter: int 10)","source_path":"/virtual/attached-defs.kvist","line":10,"column":1,"no_print":true}
+{"id":"define","op":"eval","source":"(defn attached-add [x: int] -> int (+ x 2))\n(defn attached-output [x: int] -> int (do (println \"first\") (println x) (+ x 1)))\n(defn attached-paused [x: int] -> int (do (kvist-intrinsic-breakpoint) (+ x 3)))\n(defn attached-collection-pause [values: [dynamic]int scores: map[string]int] -> int (do (kvist-intrinsic-breakpoint) (+ values[0] scores[\"a\"])))\n(defn attached-repair [x: int] -> int (do (defvar value: int x) (kvist-intrinsic-use-value-restart nil nil value \"replace attached value\") value))\n(defn attached-condition [x: int] -> int (do (kvist-intrinsic-signal-condition nil nil :attached/invalid \"attached condition\" '{}) (+ x 1)))\n(defstruct AttachedPair [left: int right: string])\n(defn attached-traced [x: int] -> int (do (discard (+ x 1)) (+ x 2)))\n(defstruct AttachedDeepItem [id: int events: [dynamic]int labels: map[string]int])\n(defn attached-deep [items: [dynamic]AttachedDeepItem] -> int (do (kvist-intrinsic-breakpoint) items[0].id))\n(defn attached-deep-map [mapped: map[string]AttachedDeepItem] -> int (do (kvist-intrinsic-breakpoint) mapped[\"k00\"].id))\n(defvar attached-counter: int 10)","source_path":"/virtual/attached-defs.kvist","line":10,"column":1,"no_print":true}
 {"id":"call","op":"eval","source":"(def attached-bound-map: map[string]int (map[string]int {\"value\" 3}))\n(def attached-bound-data: Data (let [answer 3] (quasiquote {:answer (unquote answer)})))\n(map[string]Data {\"value\" (let [answer 3] (quasiquote {:answer (unquote answer)}))})","no_print":true}
 {"id":"result","op":"eval","source":"(attached-add 4)"}
 {"id":"inspect-scalar","op":"inspect","source":"(attached-add 8)"}
-{"id":"inspect-struct","op":"inspect","source":"(AttachedPair {left: 1 right: \"two\"})"}
+{"id":"inspect-struct","op":"inspect","source":"(AttachedPair :left 1 :right \"two\")"}
 {"id":"inspect-struct-cached","op":"inspect","handle":"inspection-2"}
 {"id":"allocations-attached","op":"allocations"}
 {"id":"ownership-history-attached","op":"ownership-history"}
@@ -8887,15 +8883,13 @@ cli_repl_attach_proxies_olive_capabilities :: proc(t: ^testing.T) {
     for i in 0..<24 {
         fmt.sbprintf(
             &requests,
-            "(AttachedDeepItem %cid: %d events: ([dynamic]int [%d %d]) labels: (map[string]int %c\\\"a\\\" %d \\\"z\\\" %d%c)%c) ",
-            '{',
+            "(AttachedDeepItem :id %d :events ([dynamic]int [%d %d]) :labels (map[string]int %c\\\"a\\\" %d \\\"z\\\" %d%c)) ",
             i,
             i,
             i+100,
             '{',
             i,
             i+300,
-            '}',
             '}',
         )
     }
@@ -8916,16 +8910,14 @@ cli_repl_attach_proxies_olive_capabilities :: proc(t: ^testing.T) {
     for i in 0..<24 {
         fmt.sbprintf(
             &requests,
-            "\\\"k%02d\\\" (AttachedDeepItem %cid: %d events: ([dynamic]int [%d %d]) labels: (map[string]int %c\\\"a\\\" %d \\\"z\\\" %d%c)%c) ",
+            "\\\"k%02d\\\" (AttachedDeepItem :id %d :events ([dynamic]int [%d %d]) :labels (map[string]int %c\\\"a\\\" %d \\\"z\\\" %d%c)) ",
             i,
-            '{',
             i,
             i,
             i+200,
             '{',
             i,
             i+400,
-            '}',
             '}',
         )
     }

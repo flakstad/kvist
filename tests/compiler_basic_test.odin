@@ -29,14 +29,14 @@ compile_hello_program :: proc(t: ^testing.T) {
 (import fmt "core:fmt")
 
 ;; Greets from Kvist.
-(defstruct Greeting {
+(defstruct Greeting [
   message: string
-})
+])
 
 (defn main []
-  (let [g (Greeting {
-            message: "hello from kvist"
-          })]
+  (let [g (Greeting
+            :message "hello from kvist"
+          )]
     (fmt.println g.message)))`
 
     output, err, ok := kvist.compile_source(source)
@@ -154,6 +154,37 @@ compile_block_expression_captures_scalar_conversion_local :: proc(t: ^testing.T)
 
     testing.expect_value(t, strings.contains(output, "wake_at: i64"), true)
     testing.expect_value(t, strings.contains(output, "wake_at)"), true)
+}
+
+@(test)
+compile_match_block_does_not_capture_for_binding :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn demo [mode: Data] -> int
+  (let [result: int
+        (match mode
+          :first
+          (let [values ([2]int [1 2])
+                total 0]
+            (for [tx values]
+              (set! total (+ total tx)))
+            total)
+          :second
+          (let [tx 7]
+            tx)
+          :else 0)]
+    result))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "(proc(mode: Data) -> int"), true)
+    testing.expect_value(t, strings.contains(output, "})(mode)"), true)
 }
 
 @(test)
@@ -298,13 +329,13 @@ compile_update_bang_stmt :: proc(t: ^testing.T) {
 (import core "kvist:core")
 
 (defstruct Point
-  {x: int
-   y: int})
+  [x: int
+   y: int])
 
 (defn score [] -> int
     (let [xs ([dynamic]int [1 2 3])
         lookup (map[string]int {"a" 1})
-        point (Point {x: 4 y: 5})]
+        point (Point :x 4 :y 5)]
     (set! xs[1] 42)
     (set! (get lookup "a") 7)
     (set! (get point .x) 8)
@@ -331,16 +362,16 @@ compile_update_bang_stmt :: proc(t: ^testing.T) {
 compile_canonical_bare_core_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Point {
+(defstruct Point [
   x: int
-})
+])
 
 (defn score [needle: int] -> int
   (let [xs ([dynamic]int [1 2 3])
         lookup (map[string]int {"a" 4})
         tail (slice xs 1)
         total (count xs)
-        point (Point {x: 1})
+        point (Point :x 1)
         associated (assoc point.x total)
         updated (update associated.x + 1)]
     (update! xs[0] + 10)
@@ -486,10 +517,10 @@ compile_local_declaration_forms :: proc(t: ^testing.T) {
 (defn classify [code: int] -> int
   (def max-code: int 10)
   (defenum Status [OK Err])
-  (defstruct Payload {code: int status: Status})
-  (defunion Value {payload: Payload raw: int})
-  (let [payload (Payload {code: code status: .OK})
-        value (Value {payload: payload})]
+  (defstruct Payload [code: int status: Status])
+  (defunion Value [payload: Payload raw: int])
+  (let [payload (Payload :code code :status .OK)
+        value (Value :payload payload)]
     (if (> payload.code max-code)
       1
       0)))`
@@ -664,11 +695,11 @@ compile_indexed_symbol_expr_and_places :: proc(t: ^testing.T) {
 compile_expression_index_places :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct State {cells: [dynamic]int})
+(defstruct State [cells: [dynamic]int])
 
-(defstruct User {name: string})
+(defstruct User [name: string])
 
-(defstruct User-State {users: [dynamic]User})
+(defstruct User-State [users: [dynamic]User])
 
 (defn idx [x: int, y: int] -> int
   (+ x (* y 10)))
@@ -937,16 +968,16 @@ compile_core_higher_order_helpers_and_slice_exprs :: proc(t: ^testing.T) {
 reject_defiter_next_wrong_state_parameter :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct File_Source {
+(defstruct File_Source [
   index: int
-})
+])
 
-(defstruct Other_Source {
+(defstruct Other_Source [
   index: int
-})
+])
 
 (defn open-files [] -> File_Source
-  (File_Source {index: 0}))
+  (File_Source :index 0))
 
 (defn next-file [src: ^Other_Source] -> [path: string ok: bool]
   (return "" false))
@@ -1045,9 +1076,9 @@ main :: proc() {
 compile_rejects_list_form_address_of :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Person {
+(defstruct Person [
   name: string
-})
+])
 
 (defn borrow-name [p: ^Person] -> ^string
   (& p^.name))`
@@ -1066,15 +1097,15 @@ compile_function_style_update_bang :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
-(defstruct Point {
+(defstruct Point [
   x: int
   y: int
-})
+])
 
 (defn score [] -> int
   (let [xs ([dynamic]int [1 2 3])
         lookup (map[string]int {"a" 1})
-        point (Point {x: 4 y: 5})]
+        point (Point :x 4 :y 5)]
     (update! xs[1] + 40)
     (update! xs[2] + 3)
     (update! (get lookup "a") + 6)
@@ -1117,10 +1148,10 @@ score :: proc() -> int {
 compile_place_style_update_bang :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Point {
+(defstruct Point [
   x: int
   name: string
-})
+])
 
 (defn add-scaled [x: int scale: int delta: int] -> int
   (+ x (* scale delta)))
@@ -1129,7 +1160,7 @@ compile_place_style_update_bang :: proc(t: ^testing.T) {
   s)
 
 (defn score [] -> int
-  (let [point (Point {x: 4 name: "Ada"})
+  (let [point (Point :x 4 :name "Ada")
         total 10]
     (update! point.x add-scaled 2 3)
     (update! point.name trim-demo)
@@ -1190,15 +1221,15 @@ compile_update_bang_unary_inc :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
-(defstruct Point {
+(defstruct Point [
   y: int
-})
+])
 
 (defn inc [x: int] -> int
   (+ x 1))
 
 (defn score [] -> int
-  (let [point (Point {y: 5})]
+  (let [point (Point :y 5)]
     (update! point.y inc)
     point.y))`
 
@@ -1218,9 +1249,9 @@ compile_nil_predicate :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
-(defstruct User {
+(defstruct User [
   name: string
-})
+])
 
 (defn has-user [p: ^User] -> bool
   (not (nil? p)))
@@ -1307,11 +1338,11 @@ main :: proc() {
 reject_unknown_named_argument :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defn greet [name: string, punctuation: string = "!"] -> string
+(defn greet [name: string, punctuation: string :default "!"] -> string
   (+ name punctuation))
 
 (defn main [] -> string
-  (greet {name: "Ada" tone: "warm"}))`
+  (greet :name "Ada" :tone "warm"))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -1319,19 +1350,19 @@ reject_unknown_named_argument :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "unknown named argument tone:"), true)
-    testing.expect_value(t, strings.contains(err.message, "valid named args: name:, punctuation:"), true)
+    testing.expect_value(t, strings.contains(err.message, "unknown named argument :tone"), true)
+    testing.expect_value(t, strings.contains(err.message, "valid named args: :name, :punctuation"), true)
 }
 
 @(test)
 reject_unknown_named_argument_with_typo_suggestion :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defn greet [name: string, punctuation: string = "!"] -> string
+(defn greet [name: string, punctuation: string :default "!"] -> string
   (+ name punctuation))
 
 (defn main [] -> string
-  (greet {name: "Ada" punctuaton: "?"}))`
+  (greet :name "Ada" :punctuaton "?"))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -1339,15 +1370,15 @@ reject_unknown_named_argument_with_typo_suggestion :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "unknown named argument punctuaton:"), true)
-    testing.expect_value(t, strings.contains(err.message, "did you mean punctuation:"), true)
+    testing.expect_value(t, strings.contains(err.message, "unknown named argument :punctuaton"), true)
+    testing.expect_value(t, strings.contains(err.message, "did you mean :punctuation"), true)
 }
 
 @(test)
 reject_required_parameter_after_default_parameter :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defn greet [name: string = "Ada", punctuation: string] -> string
+(defn greet [name: string :default "Ada", punctuation: string] -> string
   (+ name punctuation))`
 
     _, err, ok := kvist.compile_source(source)
@@ -1363,11 +1394,11 @@ reject_required_parameter_after_default_parameter :: proc(t: ^testing.T) {
 compile_mixed_calls_fill_named_and_default_tail_args :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defn draw [target: int, x: int, y: int, color: int = 7, scale: int = 1] -> int
+(defn draw [target: int, x: int, y: int, color: int :default 7, scale: int :default 1] -> int
   color)
 
 (defn main [] -> int
-  (draw 99 {y: 20 x: 10 scale: 3}))`
+  (draw 99 :y 20 :x 10 :scale 3))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -1386,7 +1417,7 @@ compile_general_calls_support_trailing_named_args :: proc(t: ^testing.T) {
 (import strings "core:strings")
 
 (defn clone-temp [s: string] -> string
-  (let [[out err] (strings.clone s {allocator: context.temp_allocator})]
+  (let [[out err] (strings.clone s :allocator context.temp_allocator)]
     out))`
 
     output, err, ok := kvist.compile_source(source)
@@ -1406,7 +1437,7 @@ compile_general_dotted_calls_support_pure_named_args :: proc(t: ^testing.T) {
 (import fmt "core:fmt")
 
 (defn demo []
-  (fmt.println {value: 1 label: "ok"}))`
+  (fmt.println :value 1 :label "ok"))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -1423,11 +1454,11 @@ compile_general_dotted_calls_support_pure_named_args :: proc(t: ^testing.T) {
 reject_mixed_calls_missing_required_tail_args :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defn place [name: string, x: int, y: int, label: string = "ok"] -> string
+(defn place [name: string, x: int, y: int, label: string :default "ok"] -> string
   label)
 
 (defn main [] -> string
-  (place "enemy" {x: 10}))`
+  (place "enemy" :x 10))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -1436,7 +1467,7 @@ reject_mixed_calls_missing_required_tail_args :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
 
-    testing.expect_value(t, strings.contains(err.message, "place missing required argument y:"), true)
+    testing.expect_value(t, strings.contains(err.message, "place missing required argument :y"), true)
 }
 
 @(test)
@@ -1600,10 +1631,10 @@ compile_caller_intrinsic_expressions :: proc(t: ^testing.T) {
     source := `(package main)
 (import rt "base:runtime")
 
-(defn location [loc: rt.Source_Code_Location = #caller_location] -> rt.Source_Code_Location
+(defn location [loc: rt.Source_Code_Location :default #caller_location] -> rt.Source_Code_Location
   loc)
 
-(defn expression [x: bool, expr: string = (#caller_expression x)] -> string
+(defn expression [x: bool, expr: string :default (#caller_expression x)] -> string
   expr)
 
 (defn demo [] -> string
@@ -1611,7 +1642,7 @@ compile_caller_intrinsic_expressions :: proc(t: ^testing.T) {
   (expression true))
 
 (defn named-demo [] -> string
-  (expression {x: false}))`
+  (expression :x false))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -1678,7 +1709,7 @@ compile_reload_state_alias_program :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defstruct App_State
-  {steps: int})
+  [steps: int])
 
 (def Reload_State App_State)
 (def Reload_Version "v1")
@@ -1704,9 +1735,9 @@ compile_defstate_is_not_supported :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defstate App_State
-  {requests: int}
-  {run: run
-   version: "v1"})
+  :requests int
+  :run run
+   :version "v1")
 
 (defn run [state: ^App_State host: ^reload__Run_Host]
   (mut! state^.requests += 1))`

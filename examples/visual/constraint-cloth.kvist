@@ -21,7 +21,7 @@
 (def Hud-Font-Spacing: f32 1.0)
 
 (defstruct App-State
-  {x: [dynamic]f32
+  [x: [dynamic]f32
    y: [dynamic]f32
    old-x: [dynamic]f32
    old-y: [dynamic]f32
@@ -32,7 +32,7 @@
    metric-start: f64
    fps: f64
    update-ms: f64
-   draw-ms: f64})
+   draw-ms: f64])
 
 (defn point-index
   "Convert cloth grid x.y coordinates into a flat point index."
@@ -277,18 +277,18 @@
         old-x (make-f32-buffer Point-Count)
         old-y (make-f32-buffer Point-Count)
         pinned (make-bool-buffer Point-Count)
-        state (App-State {x: x
-                          y: y
-                          old-x: old-x
-                          old-y: old-y
-                          pinned: pinned
-                          target-fps: Initial-Target-FPS
-                          paused: false
-                          frames: 0
-                          metric-start: (rl.GetTime)
-                          fps: 0
-                          update-ms: 0
-                          draw-ms: 0})]
+        state (App-State :x x
+                          :y y
+                          :old-x old-x
+                          :old-y old-y
+                          :pinned pinned
+                          :target-fps Initial-Target-FPS
+                          :paused false
+                          :frames 0
+                          :metric-start (rl.GetTime)
+                          :fps 0
+                          :update-ms 0
+                          :draw-ms 0)]
     (rl.SetTextureFilter font.texture .BILINEAR)
     (defer (rl.UnloadFont font))
     (defer (delete state.x))

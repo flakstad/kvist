@@ -19,25 +19,25 @@
     (quote "hidden")))
 
 (defmacro compact-fields? [fields]
-  (if (and (brace? fields)
+  (if (and (vector? fields)
            (<= (count fields) 4))
     (quote true)
     (quote false)))
 
 (defmacro defentity [name fields]
-  (if (brace? fields)
+  (if (vector? fields)
     (let [make-name (symbol (str "make-" (name name)))]
       (forms
         `(defstruct ~name ~fields)
         `(defn ~make-name [] -> ~name
-           (~name {}))))
-    (error "defentity expects a brace field map")))
+           (~name []))))
+    (error "defentity expects a field vector")))
 
-(defentity User {name: string age: int})
+(defentity User [name: string age: int])
 (deffield-name User-Name-Field .name)
 (defstring-fn greeting "hello")
 (def Tag-Label: string (tag-kind info))
-(def Compact-User-Fields: bool (compact-fields? {name: string age: int}))
+(def Compact-User-Fields: bool (compact-fields? [name: string age: int]))
 
 (defn macro-authoring-demo [] -> string
   (let [user (make-User)]

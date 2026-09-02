@@ -4,20 +4,20 @@
 ;;   changes type by the end of the pipeline
 (package main)
 
-(defstruct Request {
+(defstruct Request [
   content-type: keyword
   authenticated?: bool
   trace-id: int
-})
+])
 
-(defstruct Profile {
+(defstruct Profile [
   visits: int
-})
+])
 
-(defstruct User {
+(defstruct User [
   profile: Profile
   age: int
-})
+])
 
 (defn prepare-request [req: Request, json?: bool, auth?: bool, trace?: bool] -> Request
   ;; Each true flag applies one update to the current Request. False flags leave
@@ -42,13 +42,13 @@
     (+ x.age x.profile.visits)))
 
 (defn main []
-  (println (prepare-request (Request {content-type: :html authenticated?: false trace-id: 1}) true false true))
-  (println (engagement-score (User {profile: (Profile {visits: 1}) age: 3}) 10)))
+  (println (prepare-request (Request :content-type :html :authenticated? false :trace-id 1) true false true))
+  (println (engagement-score (User :profile (Profile :visits 1) :age 3) 10)))
 
 (comment
-  (prepare-request (Request {content-type: :html authenticated?: false trace-id: 1}) true false true)
-  ;; => (Request {content-type: :json authenticated?: false trace-id: 11})
+  (prepare-request (Request :content-type :html :authenticated? false :trace-id 1) true false true)
+  ;; => (Request :content-type :json :authenticated? false :trace-id 11)
 
-  (engagement-score (User {profile: (Profile {visits: 1}) age: 3}) 10)
+  (engagement-score (User :profile (Profile :visits 1) :age 3) 10)
   ;; => 15
 )

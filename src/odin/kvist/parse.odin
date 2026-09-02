@@ -257,7 +257,7 @@ normalize_surface_type_symbol :: proc(text: string) -> string {
 
 type_constructor_head_text :: proc(text: string) -> bool {
     switch text {
-    case "slice", "dynamic", "array", "map", "matrix", "ptr", "distinct", "fn", "type":
+    case "slice", "dynamic", "array", "map", "matrix", "ptr", "distinct", "fn", "type", "typeid":
         return true
     }
     return false
@@ -400,9 +400,9 @@ parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok
             return "", Compile_Error{message = "unsupported type form", span = form.span}, false
         }
 
-        if is_symbol(form.items[0], "struct") && len(form.items) == 2 && form.items[1].kind == .Brace {
+        if is_symbol(form.items[0], "struct") && len(form.items) == 2 && form.items[1].kind == .Vector {
             if len(form.items[1].items) != 0 {
-                return "", Compile_Error{message = "anonymous struct type currently supports only struct{}", span = form.items[0].span}, false
+                return "", Compile_Error{message = "anonymous struct type currently supports only (struct [])", span = form.items[0].span}, false
             }
             return "struct{}", {}, true
         }
@@ -554,12 +554,34 @@ parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok
     }
 }
 
+is_type_separator_form :: proc(form: CST_Form) -> bool {
+    return form.kind == .Keyword && form.text == ":"
+}
+
+typed_name_parts :: proc(forms: []CST_Form, index: int) -> (name, source_name: string, type_start: int, ok: bool) {
+    if index < 0 || index >= len(forms) {
+        return "", "", index, false
+    }
+    target := forms[index]
+    if target.kind != .Symbol || len(target.text) == 0 {
+        return "", "", index, false
+    }
+    if len(target.text) > 1 && target.text[len(target.text)-1] == ':' {
+        source_name = target.text[:len(target.text)-1]
+        return map_name(source_name), source_name, index+1, true
+    }
+    if index+1 < len(forms) && is_type_separator_form(forms[index+1]) {
+        return map_name(target.text), target.text, index+2, true
+    }
+    return "", "", index, false
+}
+
 vector_is_named_returns :: proc(form: CST_Form) -> bool {
     if form.kind != .Vector || len(form.items) == 0 {
         return false
     }
-    item := form.items[0]
-    return item.kind == .Symbol && len(item.text) > 0 && item.text[len(item.text)-1] == ':'
+    _, _, _, ok := typed_name_parts(form.items[:], 0)
+    return ok
 }
 
 parse_proc_type_text_from_parts :: proc(forms: []CST_Form, start: int) -> (text: string, next: int, err: Compile_Error, ok: bool) {
@@ -630,9 +652,9 @@ parse_type_text_from_forms :: proc(forms: []CST_Form, start: int) -> (text: stri
     if is_symbol(forms[start], "fn") {
         return parse_proc_type_text_from_parts(forms, start)
     }
-    if is_symbol(forms[start], "struct") && start+1 < len(forms) && forms[start+1].kind == .Brace {
+    if is_symbol(forms[start], "struct") && start+1 < len(forms) && forms[start+1].kind == .Vector {
         if len(forms[start+1].items) != 0 {
-            return "", start, Compile_Error{message = "anonymous struct type currently supports only struct{}", span = forms[start].span}, false
+            return "", start, Compile_Error{message = "anonymous struct type currently supports only (struct [])", span = forms[start].span}, false
         }
         return "struct{}", start+2, {}, true
     }
@@ -759,32 +781,30 @@ parse_param_vector :: proc(form: CST_Form) -> (params: [dynamic]Param, err: Comp
         next_i := 0
         #partial switch target.kind {
         case .Symbol:
-            if len(target.text) == 0 {
-                return params, Compile_Error{message = "expected parameter name", span = target.span}, false
+            param_name, _, type_start, ok_typed := typed_name_parts(form.items[:], i)
+            if !ok_typed {
+                return params, Compile_Error{message = "expected typed parameter such as name: Type", span = target.span}, false
             }
-            if target.text[len(target.text)-1] != ':' {
-                return params, Compile_Error{message = "expected parameter name ending in ':'", span = target.span}, false
-            }
-            if i+1 >= len(form.items) {
+            if type_start >= len(form.items) {
                 return params, Compile_Error{message = "missing parameter type", span = target.span}, false
             }
-            if form.items[i+1].kind == .List &&
-               len(form.items[i+1].items) > 0 &&
-               form.items[i+1].items[0].kind == .Symbol &&
-               (form.items[i+1].items[0].text == "owned" ||
-                form.items[i+1].items[0].text == "borrowed") {
+            if form.items[type_start].kind == .List &&
+               len(form.items[type_start].items) > 0 &&
+               form.items[type_start].items[0].kind == .Symbol &&
+               (form.items[type_start].items[0].text == "owned" ||
+                form.items[type_start].items[0].text == "borrowed") {
                 return params, Compile_Error{
                     message = "ownership-qualified types have been removed; lifetimes are inferred from ordinary code",
-                    span = form.items[i+1].span,
+                    span = form.items[type_start].span,
                 }, false
             }
             type_text, parsed_next_i, err_type, ok_type :=
-                parse_type_text_from_forms(form.items[:], i+1)
+                parse_type_text_from_forms(form.items[:], type_start)
             if !ok_type {
                 return params, err_type, false
             }
             param = Param{
-                name      = map_name(target.text[:len(target.text)-1]),
+                name      = param_name,
                 ty        = type_text,
                 ownership = .Borrowed,
             }
@@ -794,7 +814,7 @@ parse_param_vector :: proc(form: CST_Form) -> (params: [dynamic]Param, err: Comp
         case:
             return params, Compile_Error{message = "expected parameter name", span = target.span}, false
         }
-        if next_i < len(form.items) && is_symbol(form.items[next_i], "=") {
+        if next_i < len(form.items) && form.items[next_i].kind == .Keyword && form.items[next_i].text == ":default" {
             if next_i+1 >= len(form.items) {
                 return params, Compile_Error{message = "missing default parameter value", span = form.items[next_i].span}, false
             }
@@ -802,6 +822,11 @@ parse_param_vector :: proc(form: CST_Form) -> (params: [dynamic]Param, err: Comp
             param.default_value = form.items[next_i+1]
             next_i += 2
             saw_default = true
+        } else if next_i < len(form.items) && is_symbol(form.items[next_i], "=") {
+            return params, Compile_Error{
+                message = "parameter defaults use :default; replace `= value` with `:default value`",
+                span = form.items[next_i].span,
+            }, false
         } else if saw_default {
             return params, Compile_Error{message = "parameters with defaults must trail required parameters", span = target.span}, false
         }
@@ -818,29 +843,30 @@ parse_named_returns :: proc(form: CST_Form) -> (fields: [dynamic]Named_Return, e
     i := 0
     for i < len(form.items) {
         name_form := form.items[i]
-        if name_form.kind != .Symbol || len(name_form.text) == 0 || name_form.text[len(name_form.text)-1] != ':' {
-            return fields, Compile_Error{message = "expected named return ending in ':'", span = name_form.span}, false
+        return_name, _, type_start, ok_typed := typed_name_parts(form.items[:], i)
+        if !ok_typed {
+            return fields, Compile_Error{message = "expected typed named return such as value: Type", span = name_form.span}, false
         }
-        if i+1 >= len(form.items) {
+        if type_start >= len(form.items) {
             return fields, Compile_Error{message = "missing named return type", span = name_form.span}, false
         }
-        if form.items[i+1].kind == .List &&
-           len(form.items[i+1].items) > 0 &&
-           form.items[i+1].items[0].kind == .Symbol &&
-           (form.items[i+1].items[0].text == "owned" ||
-            form.items[i+1].items[0].text == "borrowed") {
+        if form.items[type_start].kind == .List &&
+           len(form.items[type_start].items) > 0 &&
+           form.items[type_start].items[0].kind == .Symbol &&
+           (form.items[type_start].items[0].text == "owned" ||
+            form.items[type_start].items[0].text == "borrowed") {
             return fields, Compile_Error{
                 message = "ownership-qualified types have been removed; lifetimes are inferred from ordinary code",
-                span = form.items[i+1].span,
+                span = form.items[type_start].span,
             }, false
         }
         type_text, next_i, err_type, ok_type :=
-            parse_type_text_from_forms(form.items[:], i+1)
+            parse_type_text_from_forms(form.items[:], type_start)
         if !ok_type {
             return fields, err_type, false
         }
         append(&fields, Named_Return{
-            name      = map_name(name_form.text[:len(name_form.text)-1]),
+            name      = return_name,
             ty        = type_text,
             ownership = .Default,
         })
@@ -850,8 +876,8 @@ parse_named_returns :: proc(form: CST_Form) -> (fields: [dynamic]Named_Return, e
 }
 
 parse_struct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, err: Compile_Error, ok: bool) {
-    if form.kind != .Brace {
-        return fields, Compile_Error{message = "expected struct field brace form", span = form.span}, false
+    if form.kind != .Vector {
+        return fields, Compile_Error{message = "struct fields use a vector such as [name: Type]", span = form.span}, false
     }
     i := 0
     for i < len(form.items) {
@@ -859,22 +885,22 @@ parse_struct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, e
             return fields, Compile_Error{message = "missing struct field type", span = form.span}, false
         }
         key := form.items[i]
-        field_name, source_name, ok_label := parse_label_name(key)
-        if !ok_label {
-            return fields, Compile_Error{message = "expected struct field label", span = key.span}, false
+        field_name, source_name, type_start, ok_typed := typed_name_parts(form.items[:], i)
+        if !ok_typed {
+            return fields, Compile_Error{message = "expected typed struct field such as name: Type", span = key.span}, false
         }
         if struct_field_exists(fields[:], field_name) {
             return fields, Compile_Error{message = fmt.tprintf("duplicate struct field %s", key.text), span = key.span}, false
         }
         _, _, _, owned_handled, err_owned, ok_owned :=
-            parse_owned_struct_field_type(form.items[i+1])
+            parse_owned_struct_field_type(form.items[type_start])
         if !ok_owned {
             return fields, err_owned, false
         }
         if owned_handled {
             return fields, err_owned, false
         }
-        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
+        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], type_start)
         if !ok_type {
             return fields, err_type, false
         }
@@ -920,14 +946,24 @@ parse_struct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, e
     return fields, {}, true
 }
 
-parse_label_name :: proc(form: CST_Form) -> (name, source_name: string, ok: bool) {
-    if form.kind == .Symbol && len(form.text) > 1 && form.text[len(form.text)-1] == ':' {
-        source := form.text[:len(form.text)-1]
-        if len(source) > 0 {
-            return map_name(source), source, true
+brace_key_name :: proc(form: CST_Form) -> (name: string, ok: bool) {
+    if form.kind == .Keyword && len(form.text) > 1 {
+        source := form.text[1:]
+        if strings.index(source, "/") < 0 {
+            return map_name(source), true
         }
     }
-    return "", "", false
+    return "", false
+}
+
+keyword_key_error :: proc(form: CST_Form, fallback: string) -> Compile_Error {
+    if form.kind == .Symbol && len(form.text) > 1 && form.text[len(form.text)-1] == ':' {
+        return Compile_Error{
+            message = "suffix `:` is reserved for type annotations; use a prefix keyword such as :name",
+            span = form.span,
+        }
+    }
+    return Compile_Error{message = fallback, span = form.span}
 }
 
 reject_removed_struct_lifetime_metadata :: proc(form: CST_Form) -> (Compile_Error, bool) {
@@ -938,7 +974,7 @@ reject_removed_struct_lifetime_metadata :: proc(form: CST_Form) -> (Compile_Erro
         if i+1 >= len(form.items) {
             return Compile_Error{message = "missing defstruct metadata value", span = form.span}, false
         }
-        key, _, ok_key := parse_label_name(form.items[i])
+        key, ok_key := brace_key_name(form.items[i])
         if !ok_key || key != "managed" {
             continue
         }
@@ -951,8 +987,8 @@ reject_removed_struct_lifetime_metadata :: proc(form: CST_Form) -> (Compile_Erro
 }
 
 parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, err: Compile_Error, ok: bool) {
-    if form.kind != .Brace {
-        return fields, Compile_Error{message = "expected defstruct field brace form", span = form.span}, false
+    if form.kind != .Vector {
+        return fields, Compile_Error{message = "defstruct fields use a vector such as [name: Type]", span = form.span}, false
     }
     i := 0
     for i < len(form.items) {
@@ -960,22 +996,22 @@ parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field
             return fields, Compile_Error{message = "missing defstruct field type metadata", span = form.span}, false
         }
         key := form.items[i]
-        field_name, source_name, ok_label := parse_label_name(key)
-        if !ok_label {
-            return fields, Compile_Error{message = "expected defstruct field label", span = key.span}, false
+        field_name, source_name, type_start, ok_typed := typed_name_parts(form.items[:], i)
+        if !ok_typed {
+            return fields, Compile_Error{message = "expected typed defstruct field such as name: Type", span = key.span}, false
         }
         if struct_field_exists(fields[:], field_name) {
             return fields, Compile_Error{message = fmt.tprintf("duplicate defstruct field %s", key.text), span = key.span}, false
         }
         _, _, _, owned_handled, err_owned, ok_owned :=
-            parse_owned_struct_field_type(form.items[i+1])
+            parse_owned_struct_field_type(form.items[type_start])
         if !ok_owned {
             return fields, err_owned, false
         }
         if owned_handled {
             return fields, err_owned, false
         }
-        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
+        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], type_start)
         if !ok_type {
             return fields, err_type, false
         }
@@ -1022,8 +1058,8 @@ parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field
 }
 
 parse_union_variants :: proc(form: CST_Form) -> (variants: [dynamic]Union_Variant, err: Compile_Error, ok: bool) {
-    if form.kind != .Brace {
-        return variants, Compile_Error{message = "expected union variant brace form", span = form.span}, false
+    if form.kind != .Vector {
+        return variants, Compile_Error{message = "union variants use a vector such as [value: Type]", span = form.span}, false
     }
     i := 0
     for i < len(form.items) {
@@ -1031,11 +1067,11 @@ parse_union_variants :: proc(form: CST_Form) -> (variants: [dynamic]Union_Varian
             return variants, Compile_Error{message = "missing union variant type", span = form.span}, false
         }
         key := form.items[i]
-        variant_name, _, ok_label := parse_label_name(key)
-        if !ok_label {
-            return variants, Compile_Error{message = "expected union variant label", span = key.span}, false
+        variant_name, _, type_start, ok_typed := typed_name_parts(form.items[:], i)
+        if !ok_typed {
+            return variants, Compile_Error{message = "expected typed union variant such as value: Type", span = key.span}, false
         }
-        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
+        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], type_start)
         if !ok_type {
             return variants, err_type, false
         }
@@ -1068,13 +1104,13 @@ parse_enum_variants :: proc(form: CST_Form) -> (variants: [dynamic]Enum_Variant,
                 return variants, Compile_Error{message = "missing enum variant value", span = form.span}, false
             }
             key := form.items[i]
-            variant_name, variant_source_name, ok_label := parse_label_name(key)
-            if !ok_label {
-                return variants, Compile_Error{message = "expected enum variant label", span = key.span}, false
+            variant_name, ok_keyword := brace_key_name(key)
+            if !ok_keyword {
+                return variants, Compile_Error{message = "explicit enum values use keyword keys such as {:OK 200}", span = key.span}, false
             }
             append(&variants, Enum_Variant{
                 name = variant_name,
-                source_name = variant_source_name,
+                source_name = key.text[1:],
                 has_value = true,
                 value = form.items[i+1],
             })
@@ -1320,28 +1356,39 @@ parse_decl_typed_binding :: proc(
     ok: bool,
 ) {
     raw_name := form.items[1].text
-    if len(raw_name) > 0 && raw_name[len(raw_name)-1] == ':' {
-        if len(raw_name) == 1 {
-            return "", false, "", false, {}, Compile_Error{message = fmt.tprintf("%s expects a name before :", head_name), span = form.items[1].span}, false
+    typed_name := ""
+    type_start := value_index
+    has_annotation := false
+    if len(raw_name) > 1 && raw_name[len(raw_name)-1] == ':' {
+        typed_name = raw_name[:len(raw_name)-1]
+        has_annotation = true
+    } else if value_index < len(form.items) && is_type_separator_form(form.items[value_index]) {
+        typed_name = raw_name
+        type_start = value_index + 1
+        has_annotation = true
+    }
+    if has_annotation {
+        if type_start >= len(form.items) {
+            return "", false, "", false, {}, Compile_Error{message = fmt.tprintf("typed %s missing type", head_name), span = form.span}, false
         }
-        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], value_index)
+        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], type_start)
         if !ok_type {
             return "", false, "", false, {}, err_type, false
         }
         if next_i >= len(form.items) {
             if allow_typed_missing_value {
-                return map_name(raw_name[:len(raw_name)-1]), true, type_text, false, {}, {}, true
+                return map_name(typed_name), true, type_text, false, {}, {}, true
             }
             return "", false, "", false, {}, Compile_Error{message = fmt.tprintf("typed %s missing value", head_name), span = form.span}, false
         }
         if next_i+1 != len(form.items) {
             return "", false, "", false, {}, Compile_Error{message = fmt.tprintf("%s expects exactly one value", head_name), span = form.items[next_i+1].span}, false
         }
-        return map_name(raw_name[:len(raw_name)-1]), true, type_text, true, form.items[next_i], {}, true
+        return map_name(typed_name), true, type_text, true, form.items[next_i], {}, true
     }
 
     if len(form.items) != value_index+1 {
-        return "", false, "", false, {}, Compile_Error{message = fmt.tprintf("typed %s expects a name ending in ':'", head_name), span = form.items[1].span}, false
+        return "", false, "", false, {}, Compile_Error{message = fmt.tprintf("typed %s uses shorthand name: Type or full form name : Type", head_name), span = form.items[1].span}, false
     }
     return map_name(raw_name), false, "", true, form.items[value_index], {}, true
 }
@@ -1571,7 +1618,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
         }, {}, true
     case "defstruct", "defstruct-":
         if len(form.items) != 3 && len(form.items) != 4 && len(form.items) != 5 {
-            return decl, Compile_Error{message = fmt.tprintf("%s expects a name, optional docstring, a brace field form, and optional brace metadata form", head.text), span = form.span}, false
+            return decl, Compile_Error{message = fmt.tprintf("%s expects a name, optional docstring, a vector field form, and optional metadata", head.text), span = form.span}, false
         }
         if form.items[1].kind != .Symbol {
             return decl, Compile_Error{message = fmt.tprintf("%s expects a symbol name", head.text), span = form.items[1].span}, false
@@ -1591,8 +1638,8 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
         } else if len(form.items) == 4 {
             meta_index = 3
         }
-        if form.items[field_index].kind != .Brace {
-            return decl, Compile_Error{message = fmt.tprintf("%s expects a brace field form", head.text), span = form.items[field_index].span}, false
+        if form.items[field_index].kind != .Vector {
+            return decl, Compile_Error{message = fmt.tprintf("%s fields use a vector such as [name: Type]", head.text), span = form.items[field_index].span}, false
         }
         if meta_index >= 0 && form.items[meta_index].kind != .Brace {
             return decl, Compile_Error{message = fmt.tprintf("%s metadata must be a brace form", head.text), span = form.items[meta_index].span}, false
@@ -1618,7 +1665,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
         }, {}, true
     case "defenum", "defenum-":
         if len(form.items) < 3 || form.items[1].kind != .Symbol {
-            return decl, Compile_Error{message = "defenum expects a name and variant vector or brace form", span = form.span}, false
+            return decl, Compile_Error{message = "defenum expects a name and a variant vector or explicit keyword map", span = form.span}, false
         }
         doc_lines := top_form.doc_lines
         variant_index := 2
@@ -1627,7 +1674,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             variant_index = 3
         }
         if len(form.items) != variant_index+1 {
-            return decl, Compile_Error{message = "defenum expects a name and variant vector or brace form", span = form.span}, false
+            return decl, Compile_Error{message = "defenum expects a name and a variant vector or explicit keyword map", span = form.span}, false
         }
         variants, err_variants, ok_variants := parse_enum_variants(form.items[variant_index])
         if !ok_variants {
@@ -1644,7 +1691,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
         }, {}, true
     case "defunion", "defunion-":
         if len(form.items) < 3 || form.items[1].kind != .Symbol {
-            return decl, Compile_Error{message = "defunion expects a name and variant brace form", span = form.span}, false
+            return decl, Compile_Error{message = "defunion expects a name and variant vector", span = form.span}, false
         }
         doc_lines := top_form.doc_lines
         variant_index := 2
@@ -1653,7 +1700,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             variant_index = 3
         }
         if len(form.items) != variant_index+1 {
-            return decl, Compile_Error{message = "defunion expects a name and variant brace form", span = form.span}, false
+            return decl, Compile_Error{message = "defunion expects a name and variant vector", span = form.span}, false
         }
         variants, err_variants, ok_variants := parse_union_variants(form.items[variant_index])
         if !ok_variants {

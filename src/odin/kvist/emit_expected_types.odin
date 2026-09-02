@@ -6,8 +6,8 @@ import "core:strings"
 import "core:time"
 
 emit_expr_with_owned_nested_temps :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
-    if form_is_owned_constructor_result(form) || form_is_literal_constructor_call(form) ||
-       form_is_named_arg_brace(form) || form_is_transform_loop_call(form) {
+    if form_is_owned_constructor_result(form) || form_is_literal_constructor_call(form, e) ||
+       form_is_transform_loop_call(form) {
         return emit_expr(e, form)
     }
     #partial switch form.kind {
@@ -73,8 +73,7 @@ emit_expr_with_owned_nested_temps :: proc(e: ^Emitter, form: CST_Form) -> (strin
                 managed_ty = expected_type
                 item_is_owned_managed = true
             }
-            if form_is_named_arg_brace(item) ||
-               !(item_is_owned_native ||
+            if !(item_is_owned_native ||
                  item_is_owned_managed ||
                  form_has_nested_owned_value(item, e)) {
                 if has_expected_type {

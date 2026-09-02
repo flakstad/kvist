@@ -7,31 +7,31 @@
   Read-Only
 ])
 
-(defstruct Endpoint {
+(defstruct Endpoint [
   host-id: i64
   display-name: string :default "unnamed"
   secure: bool :default false
   tags: Data :default '[]
-})
+])
 
-(defstruct Settings {
+(defstruct Settings [
   port: i64
   enabled: bool
   ratio: f64 :default 1.0
   metadata: Data :default '{}
   endpoint: Endpoint
   mode: Mode :default .Manual
-  fallback-endpoint: Endpoint :default (Endpoint {host-id: -1})
+  fallback-endpoint: Endpoint :default (Endpoint :host-id -1)
   scores: [dynamic]i64 :default []
   raw-items: [dynamic]Data :default []
   flags: [dynamic]bool :default []
   ratios: [dynamic]f64 :default []
   modes: [dynamic]Mode :default []
   endpoints: [dynamic]Endpoint :default []
-})
+])
 
 (defn main []
-  (let [endpoint (Endpoint {host-id: 6})]
+  (let [endpoint (Endpoint :host-id 6)]
     (assert (= endpoint.display-name "unnamed"))
     (assert (not endpoint.secure))
     (assert (= endpoint.tags '[])))

@@ -6,19 +6,19 @@
 (import os "core:os")
 (import set "kvist:set")
 
-(defn set-from-data [values: Data] -> (map i64 (struct {}))
+(defn set-from-data [values: Data] -> (map i64 (struct []))
   (let [result (set.empty i64)]
     (for [index (arr.range 0 (data.count values))]
       (set.add! result (data.int (data.nth values index))))
     result))
 
-(defn copy-set [source: (map i64 (struct {}))] -> (map i64 (struct {}))
+(defn copy-set [source: (map i64 (struct []))] -> (map i64 (struct []))
   (let [result (set.empty i64 (count source))]
     (for [value _ source]
       (set.add! result value))
     result))
 
-(defn print-set [value: (map i64 (struct {}))]
+(defn print-set [value: (map i64 (struct []))]
   (fmt.printf "%d\t" (count value))
   (for [member (arr.range -4 5)]
     (fmt.printf "%d\t" (if (set.contains? value (i64 member)) 1 0))))

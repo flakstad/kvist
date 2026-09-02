@@ -3,10 +3,10 @@
 (package main)
 (import core "kvist:core")
 
-(defstruct Score {
+(defstruct Score [
   value: int
   bonus: int
-})
+])
 
 (defn apply-bonus [score: Score] -> Score
   ;; By-value update: copy, mutate the local copy, return the new value.
@@ -21,13 +21,13 @@
   (set! score^.bonus 0))
 
 (defn value-style-score [] -> int
-  (let [original (Score {value: 10 bonus: 5})
+  (let [original (Score :value 10 :bonus 5)
         updated (apply-bonus original)]
     ;; `original` stays unchanged because the update happened on a copy.
     (+ original.value updated.value)))
 
 (defn pointer-style-score [] -> int
-  (let [score (Score {value: 10 bonus: 5})]
+  (let [score (Score :value 10 :bonus 5)]
     (apply-bonus! (addr score))
     ;; `score` changed in place.
     score.value))

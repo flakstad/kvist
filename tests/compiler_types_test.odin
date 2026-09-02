@@ -182,7 +182,7 @@ compile_operator_context_supports_distinct_and_generic_types :: proc(t: ^testing
 infer_offset_of_intrinsic_as_uintptr :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct User {age: int})
+(defstruct User [age: int])
 
 (defn age-offset [] -> uintptr
   (let [offset (odin-call "offset_of" User age)]
@@ -307,12 +307,12 @@ reject_explicit_numeric_if_branch_mismatch_with_expected_unsigned_type :: proc(
 compile_type_payload_case_expression_with_expected_type :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Connected {id: int})
-(defstruct Disconnected {reason: string})
-(defunion Event {
+(defstruct Connected [id: int])
+(defstruct Disconnected [reason: string])
+(defunion Event [
   connected: Connected
   disconnected: Disconnected
-})
+])
 
 (defn score [event: Event] -> int
   (let [value: int (case event
@@ -368,16 +368,16 @@ compile_defstruct_program :: proc(t: ^testing.T) {
 
 (defstruct Profile
   "Profile data."
-  {name: string
+  [name: string
    age: int
    active?: bool
-   tags: (map string (struct {}))
+   tags: (map string (struct []))
    scores: [dynamic]int
-   home: Point})
+   home: Point])
 
 (defstruct Point
-  {x: float
-   y: float})`
+  [x: float
+   y: float])`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -412,8 +412,8 @@ compile_defstruct_rejects_duplicate_fields :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defstruct Broken
-  {name: string
-   name: int})`
+  [name: string
+   name: int])`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -428,14 +428,14 @@ compile_defstruct_rejects_duplicate_fields :: proc(t: ^testing.T) {
 compile_defstruct_using_field :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Logger {
+(defstruct Logger [
   level: int
-})
+])
 
-(defstruct App {
+(defstruct App [
   logger: Logger :using
   port: int
-})`
+])`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -454,11 +454,11 @@ compile_struct_constructor_rejects_unknown_field :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defstruct Person
-  {name: string
-   age: int})
+  [name: string
+   age: int])
 
 (defn bad [] -> Person
-  (Person {name: "Ada" extra: 1}))`
+  (Person :name "Ada" :extra 1))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -466,7 +466,7 @@ compile_struct_constructor_rejects_unknown_field :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "unknown struct constructor field extra:"), true)
+    testing.expect_value(t, strings.contains(err.message, "unknown struct constructor field :extra"), true)
 }
 
 @(test)
@@ -474,11 +474,11 @@ compile_struct_constructor_rejects_duplicate_field :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defstruct Person
-  {name: string
-   age: int})
+  [name: string
+   age: int])
 
 (defn bad [] -> Person
-  (Person {name: "Ada" name: "Grace"}))`
+  (Person :name "Ada" :name "Grace"))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -486,7 +486,7 @@ compile_struct_constructor_rejects_duplicate_field :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "duplicate struct constructor field name:"), true)
+    testing.expect_value(t, strings.contains(err.message, "duplicate struct constructor field :name"), true)
 }
 
 @(test)
@@ -494,11 +494,11 @@ compile_struct_constructor_rejects_literal_type_mismatch :: proc(t: ^testing.T) 
     source := `(package main)
 
 (defstruct Person
-  {name: string
-   age: int})
+  [name: string
+   age: int])
 
 (defn bad [] -> Person
-  (Person {name: 42 age: "old"}))`
+  (Person :name 42 :age "old"))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -506,33 +506,33 @@ compile_struct_constructor_rejects_literal_type_mismatch :: proc(t: ^testing.T) 
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "struct constructor literal type mismatch for name:") || strings.contains(err.message, "struct constructor literal type mismatch for age:"), true)
+    testing.expect_value(t, strings.contains(err.message, "struct constructor literal type mismatch for :name") || strings.contains(err.message, "struct constructor literal type mismatch for :age"), true)
 }
 
 @(test)
 compile_label_fields_for_struct_union_and_enum :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Point {
+(defstruct Point [
   x: f32
   y: f32
-})
+])
 
-(defunion Value {
+(defunion Value [
   i: int
   label: string
-})
+])
 
 (defenum Http-Status {
-  OK: 200
-  Not-Found: 404
+  :OK 200
+  :Not-Found 404
 })
 
 (defn point [] -> Point
-  (Point {x: 1.0 y: 2.0}))
+  (Point :x 1.0 :y 2.0))
 
 (defn value [] -> Value
-  (Value {i: 42}))
+  (Value :i 42))
 
 (defn status [] -> Http-Status
   .OK)`
@@ -613,7 +613,7 @@ compile_generic_type_constructor_form :: proc(t: ^testing.T) {
 (odin "Box :: struct($T: typeid) {value: T}")
 
 (defn box [x: i32] -> (Box i32)
-  ((Box i32) {value: x}))`
+  ((Box i32) :value x))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -624,6 +624,28 @@ compile_generic_type_constructor_form :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "box :: proc(x: i32) -> Box(i32)"), true)
+    testing.expect_value(t, strings.contains(output, "return Box(i32){value = x}"), true)
+}
+
+@(test)
+compile_typeid_form_defines_polymorphic_type_alias :: proc(t: ^testing.T) {
+    source := `(package main)
+(odin "Box :: struct($T: typeid) {value: T}")
+
+(def Int-Box (typeid Box i32))
+
+(defn box [x: i32] -> Int-Box
+  ((Box i32) :value x))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "Int_Box :: Box(i32)"), true)
     testing.expect_value(t, strings.contains(output, "return Box(i32){value = x}"), true)
 }
 
@@ -657,14 +679,14 @@ compile_type_call_position_supports_complex_symbol_heads :: proc(t: ^testing.T) 
 compile_get_field_selector_and_enum_key :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Point {
+(defstruct Point [
   x: int
-})
+])
 
 (defenum Status [Active Inactive])
 
 (defn score [] -> int
-  (let [point (Point {x: 4})
+  (let [point (Point :x 4)
         counts (map[Status]int {.Active 7})]
     (+ (get point .x)
        (get counts .Active))))`
@@ -684,9 +706,9 @@ compile_get_field_selector_and_enum_key :: proc(t: ^testing.T) {
 compile_rejects_duplicate_struct_field_defaults :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Config {
+(defstruct Config [
   retries: int :default 1 :default 2
-})`
+])`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -699,12 +721,12 @@ compile_rejects_duplicate_struct_field_defaults :: proc(t: ^testing.T) {
 compile_validates_struct_field_default_types :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Config {
+(defstruct Config [
   retries: int :default "many"
-})
+])
 
 (defn config [] -> Config
-  (Config {}))`
+  (Config []))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -729,9 +751,9 @@ compile_const_and_enum_forms :: proc(t: ^testing.T) {
 ])
 
 (defenum Http-Status {
-  OK: 200
-  Not-Found: 404
-  Unprocessable-Content: 422
+  :OK 200
+  :Not-Found 404
+  :Unprocessable-Content 422
 })`
 
     output, err, ok := kvist.compile_source(source)
@@ -791,9 +813,9 @@ compile_local_typed_defvar_without_initializer :: proc(t: ^testing.T) {
 compile_def_type_alias_forms :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Order {
+(defstruct Order [
   id: int
-})
+])
 
 (def Handle (distinct rawptr))
 (def Order-Groups map[int][dynamic]Order)
@@ -829,7 +851,7 @@ compile_rejects_old_typed_def_and_defvar_spelling :: proc(t: ^testing.T) {
     if ok {
         delete(output)
     }
-    testing.expect_value(t, strings.contains(err.message, "typed def expects a name ending in ':'"), true)
+    testing.expect_value(t, strings.contains(err.message, "typed def uses shorthand name: Type or full form name : Type"), true)
     delete(err.message)
 
     var_source := `(package main)
@@ -841,8 +863,153 @@ compile_rejects_old_typed_def_and_defvar_spelling :: proc(t: ^testing.T) {
     if ok {
         delete(output)
     }
-    testing.expect_value(t, strings.contains(err.message, "typed defvar expects a name ending in ':'"), true)
+    testing.expect_value(t, strings.contains(err.message, "typed defvar uses shorthand name: Type or full form name : Type"), true)
     delete(err.message)
+}
+
+@(test)
+compile_accepts_expanded_type_separator :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def answer : int 41)
+(defvar counter : int 0)
+
+(defn add-one [value : int] -> [result : int ok: bool]
+  (return (+ value 1) true))
+
+(defn main [] -> int
+  (let [[result ok] (add-one answer)]
+    (if ok result counter)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "answer: int : 41"), true)
+    testing.expect_value(t, strings.contains(output, "counter: int"), true)
+    testing.expect_value(t, strings.contains(output, "add_one :: proc(value: int) -> (result: int, ok: bool)"), true)
+}
+
+@(test)
+compile_local_defvar_accepts_expanded_type_separator :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn initialized [] -> int
+  (defvar value : int 41)
+  (inc! value)
+  value)
+
+(defn zero-initialized [] -> int
+  (defvar value : int)
+  (set! value 42)
+  value)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "value: int = 41"), true)
+    testing.expect_value(t, strings.contains(output, "value: int\n"), true)
+    testing.expect_value(t, strings.contains(output, "value = 42"), true)
+}
+
+@(test)
+compile_rejects_removed_layout_and_default_spellings :: proc(t: ^testing.T) {
+    sources := []string{
+        `(package main) (defstruct User {name: string})`,
+        `(package main) (defn greet [name: string = "Ada"] -> string name)`,
+        `(package main) (defenum Status {Ready: 1})`,
+    }
+    messages := []string{
+        "defstruct fields use a vector",
+        "parameter defaults use :default",
+        "explicit enum values use keyword keys",
+    }
+    for source, index in sources {
+        _, err, ok := kvist.compile_source(source)
+        testing.expect_value(t, ok, false)
+        if ok {
+            continue
+        }
+        testing.expect_value(t, strings.contains(err.message, messages[index]), true)
+        delete(err.message)
+    }
+}
+
+@(test)
+compile_rejects_map_as_struct_constructor :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct User [name: string])
+
+(defn bad [] -> User
+  (User {:name "Ada"}))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "receives a map as one value"), true)
+}
+
+@(test)
+compile_struct_constructor_supports_positional_named_and_vector_forms :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Greet [
+  firstname: string
+  lastname: string
+])
+
+(defn positional [] -> Greet
+  (Greet "hello" "there"))
+
+(defn named [] -> Greet
+  (Greet :lastname "there" :firstname "hello"))
+
+(defn from-vector [] -> Greet
+  (Greet ["hello" "there"]))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected_positional := `return Greet{"hello", "there"}`
+    expected_named := `return Greet{lastname = "there", firstname = "hello"}`
+    testing.expect_value(t, strings.count(output, expected_positional), 2)
+    testing.expect_value(t, strings.count(output, expected_named), 1)
+}
+
+@(test)
+compile_struct_constructor_rejects_empty_call :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Marker [])
+
+(defn marker [] -> Marker
+  (Marker))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "zero-value construction uses (zero Marker) or (Marker [])"), true)
 }
 
 @(test)
@@ -850,8 +1017,8 @@ compile_local_struct_validates_constructors :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defn broken [] -> int
-  (defstruct Local {x: int})
-  (let [value (Local {y: 1})]
+  (defstruct Local [x: int])
+  (let [value (Local :y 1)]
     0))`
 
     _, err, ok := kvist.compile_source(source)
@@ -860,17 +1027,17 @@ compile_local_struct_validates_constructors :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "unknown struct constructor field y:"), true)
+    testing.expect_value(t, strings.contains(err.message, "unknown struct constructor field :y"), true)
 }
 
 @(test)
 compile_type_call_struct_constructor_uses_field_type_context :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Level {platforms: [dynamic]int})
+(defstruct Level [platforms: [dynamic]int])
 
 (defn main []
-  (let [level (Level {platforms: []})]
+  (let [level (Level :platforms [])]
     level))`
 
     output, err, ok := kvist.compile_source(source)
@@ -894,8 +1061,8 @@ compile_defenum_and_defunion_aliases :: proc(t: ^testing.T) {
 
 (defunion Value
   "Tagged value."
-  {i: int
-   s: string})`
+  [i: int
+   s: string])`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -916,8 +1083,8 @@ compile_canonical_struct_introspection_forms :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defstruct Profile
-  {name: string
-   active?: bool})
+  [name: string
+   active?: bool])
 
 (defn main []
   (println (struct-fields 'Profile) (struct-types 'Profile)))`
@@ -940,7 +1107,7 @@ reject_slash_struct_introspection_compiler_aliases :: proc(t: ^testing.T) {
     fields_source := `(package main)
 
 (defstruct Profile
-  {name: string})
+  [name: string])
 
 (defn main []
   (println (struct/fields 'Profile)))`
@@ -958,7 +1125,7 @@ reject_slash_struct_introspection_compiler_aliases :: proc(t: ^testing.T) {
     types_source := `(package main)
 
 (defstruct Profile
-  {name: string})
+  [name: string])
 
 (defn main []
   (println (struct/types 'Profile)))`
@@ -979,13 +1146,13 @@ compile_union_decl_and_constructor :: proc(t: ^testing.T) {
     source := `(package main)
 
 ;; Tagged sum for testing constructors.
-(defunion Value {
+(defunion Value [
   i: int
   s: string
-})
+])
 
 (defn wrap-int [n: int] -> Value
-  (Value {i: n}))`
+  (Value :i n))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -1014,10 +1181,10 @@ wrap_int :: proc(n: int) -> Value {
 compile_case_with_union_type_payload :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defunion Value {
+(defunion Value [
   i: int
   s: string
-})
+])
 
 (defn describe [value: Value] -> string
   (case value
@@ -1059,25 +1226,25 @@ describe :: proc(value: Value) -> string {
 compile_case_with_union_payload_patterns :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Connected {
+(defstruct Connected [
   id: int
-})
+])
 
-(defstruct Disconnected {
+(defstruct Disconnected [
   id: int
   reason: string
-})
+])
 
-(defstruct Data {
+(defstruct Data [
   id: int
   payload: string
-})
+])
 
-(defunion Event {
+(defunion Event [
   connected: Connected
   disconnected: Disconnected
   data: Data
-})
+])
 
 (defn event-score [event: Event] -> int
   (case event
@@ -1112,18 +1279,18 @@ compile_case_with_union_payload_patterns :: proc(t: ^testing.T) {
 compile_case_with_ignored_union_payload :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Connected {
+(defstruct Connected [
   id: int
-})
+])
 
-(defstruct Data {
+(defstruct Data [
   payload: string
-})
+])
 
-(defunion Event {
+(defunion Event [
   connected: Connected
   data: Data
-})
+])
 
 (defn event-score [event: Event] -> int
   (case event
@@ -1149,18 +1316,18 @@ compile_case_flat_union_payload_arm_with_do_body :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
-(defstruct Connected {
+(defstruct Connected [
   id: int
-})
+])
 
-(defstruct Disconnected {
+(defstruct Disconnected [
   reason: string
-})
+])
 
-(defunion Event {
+(defunion Event [
   connected: Connected
   disconnected: Disconnected
-})
+])
 
 (defn event-score [event: Event] -> int
   (case event
@@ -1192,13 +1359,13 @@ compile_case_flat_union_payload_arm_with_do_body :: proc(t: ^testing.T) {
 reject_case_mixing_value_and_type_patterns :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Connected {
+(defstruct Connected [
   id: int
-})
+])
 
-(defunion Event {
+(defunion Event [
   connected: Connected
-})
+])
 
 (defn event-score [event: Event] -> int
   (case event
@@ -1220,13 +1387,13 @@ reject_case_mixing_value_and_type_patterns :: proc(t: ^testing.T) {
 reject_case_value_then_type_pattern :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Connected {
+(defstruct Connected [
   id: int
-})
+])
 
-(defunion Event {
+(defunion Event [
   connected: Connected
-})
+])
 
 (defn event-score [event: Event] -> int
   (case event
@@ -1248,17 +1415,17 @@ reject_case_value_then_type_pattern :: proc(t: ^testing.T) {
 reject_case_type_pattern_shape :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Connected {
+(defstruct Connected [
   id: int
-})
+])
 
-(defunion Event {
+(defunion Event [
   connected: Connected
-})
+])
 
 (defn event-score [event: Event] -> int
   (case event
-    (Connected) 1
+    (Connected []) 1
     0))`
 
     _, err, ok := kvist.compile_source(source)
@@ -1275,7 +1442,7 @@ reject_case_type_pattern_shape :: proc(t: ^testing.T) {
 compile_indexed_field_symbol_places :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Columns {x: [dynamic]f32})
+(defstruct Columns [x: [dynamic]f32])
 
 (defn step [cols: Columns, i: int, dx: f32] -> f32
   (mut! cols.x[i] += dx)
@@ -1297,13 +1464,13 @@ compile_indexed_field_symbol_places :: proc(t: ^testing.T) {
 compile_field_access_on_call_result :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct User {
+(defstruct User [
   name: string
   age: int
-})
+])
 
 (defn make-user [] -> User
-  (User {name: "Ada" age: 36}))
+  (User :name "Ada" :age 36))
 
 (defn main [] -> string
   (make-user).name)`
@@ -1323,12 +1490,12 @@ compile_field_access_on_call_result :: proc(t: ^testing.T) {
 compile_proc_params_reject_field_destructuring :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Point {
+(defstruct Point [
   x: int
   y: int
-})
+])
 
-(defn draw [{keys: [x y] as: point}: Point] -> int
+(defn draw [{:keys [x y] :as point} : Point] -> int
   (+ x y))`
 
     _, err, ok := kvist.compile_source(source)
@@ -1346,7 +1513,7 @@ compile_typed_block_expression_captures_field_selector_root :: proc(t: ^testing.
 (import arr "kvist:arr")
 
 (defstruct Bucket
-  {entries: []int})
+  [entries: []int])
 
 (defn copy-entries [bucket: Bucket] -> [dynamic]int
   (let [copied: [dynamic]int
@@ -1446,9 +1613,9 @@ compile_polymorphic_type_form :: proc(t: ^testing.T) {
     source := `(package main)
 (import chan "core:sync/chan")
 
-(defstruct Queue {
+(defstruct Queue [
   jobs: (typeid chan.Chan int)
-})
+])
 
 (defn recv-job [jobs: (typeid chan.Chan int)] -> int
   (let [[value ok] (chan.recv jobs)]
@@ -1505,14 +1672,14 @@ main :: proc() {
 compile_typed_vector_literal_passes_element_type_to_let_items :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Entry {
+(defstruct Entry [
   attrs: [dynamic]string
-})
+])
 
 (defn entries [] -> [dynamic]Entry
   ([dynamic]Entry
     [(let [attrs ([dynamic]string ["name" "email"])]
-       (Entry {attrs: attrs}))]))`
+       (Entry :attrs attrs))]))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -1562,10 +1729,10 @@ compile_typed_odin_aggregate_keyword_labels :: proc(t: ^testing.T) {
 (import rl "vendor:raylib")
 
 (defn rect [frame: int width: f32 frames: int height: f32] -> rl.Rectangle
-  (rl.Rectangle {x: (/ (* (f32 frame) width) (f32 frames))
-                 y: 0
-                 width: (/ width (f32 frames))
-                 height: height}))`
+  (rl.Rectangle :x (/ (* (f32 frame) width) (f32 frames))
+                 :y 0
+                 :width (/ width (f32 frames))
+                 :height height))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -1659,9 +1826,9 @@ compile_keyword_literal_with_embedded_colon :: proc(t: ^testing.T) {
 compile_keyword_struct_field_and_comparison :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Config {
+(defstruct Config [
   mode: keyword
-})
+])
 
 (defn dev? [cfg: Config] -> bool
   (= cfg.mode :dev))`
@@ -1717,57 +1884,52 @@ platform_collider :: proc(pos: rl.Vector2) -> rl.Rectangle {
 }
 
 @(test)
-compile_rejects_positional_brace_aggregate_literals :: proc(t: ^testing.T) {
+compile_accepts_imported_struct_positional_arguments :: proc(t: ^testing.T) {
     source := `(package main)
 (import rl "vendor:raylib")
 
 (defn bad [] -> rl.Vector2
-  (rl.Vector2 {0 0}))`
+  (rl.Vector2 0 0))`
 
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    if ok {
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
         return
     }
-    defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "positional aggregate literals use vector syntax"), true)
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "return rl.Vector2{0, 0}"), true)
 }
 
 @(test)
-compile_rejects_multi_argument_struct_construction_with_kvist_diagnostic :: proc(t: ^testing.T) {
+compile_accepts_local_struct_positional_arguments :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct User {
+(defstruct User [
   name: string
   email: string
-})
+])
 
-(defn bad [] -> User
+(defn make-user [] -> User
   (User "name1" "email1"))`
 
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    if ok {
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
         return
     }
-    defer delete(err.message)
-    testing.expect_value(
-        t,
-        strings.contains(
-            err.message,
-            "struct construction expects one brace or vector aggregate; use (User {field: value ...}) or (User [value ...])",
-        ),
-        true,
-    )
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "return User{\"name1\", \"email1\"}"), true)
 }
 
 @(test)
-compile_accepts_trailing_colon_field_labels :: proc(t: ^testing.T) {
+compile_accepts_order_independent_named_struct_arguments :: proc(t: ^testing.T) {
     source := `(package main)
 (import rl "vendor:raylib")
 
 (defn rect [] -> rl.Rectangle
-  (rl.Rectangle {x: 0 y: 0 width: 1 height: 1}))`
+  (rl.Rectangle :height 1 :x 0 :width 1 :y 0))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -1777,23 +1939,23 @@ compile_accepts_trailing_colon_field_labels :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "return rl.Rectangle{x = 0, y = 0, width = 1, height = 1}"), true)
+    testing.expect_value(t, strings.contains(output, "return rl.Rectangle{height = 1, x = 0, width = 1, y = 0}"), true)
 }
 
 @(test)
 compile_multiline_composite_literals :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Handler {
+(defstruct Handler [
   run: (fn [] -> int)
-})
+])
 
 (defn main []
-  (let [handler (Handler {run: (fn [] -> int
-                                  42)})
+  (let [handler (Handler :run (fn [] -> int
+                                  42))
         handlers ((slice Handler)
-                   [(Handler {run: (fn [] -> int
-                                      7)})])]
+                   [(Handler :run (fn [] -> int
+                                      7))])]
     (return)))`
 
     output, err, ok := kvist.compile_source(source)
@@ -1833,9 +1995,9 @@ main :: proc() {
 compile_pointer_deref_and_address_of :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Person {
+(defstruct Person [
   name: string
-})
+])
 
 (defn ptr-value [x: ^int] -> int
   (deref x))
@@ -1908,11 +2070,11 @@ compile_shallow_struct_assoc_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
-(defstruct Point {
+(defstruct Point [
   x: int
   y: int
   name: string
-})
+])
 
 (defn inc [x: int] -> int
   (+ x 1))
@@ -1921,7 +2083,7 @@ compile_shallow_struct_assoc_exprs :: proc(t: ^testing.T) {
   (+ (* x scale) offset))
 
 (defn score [] -> int
-  (let [point (Point {x: 4 y: 5 name: "old"})
+  (let [point (Point :x 4 :y 5 :name "old")
         older (assoc point.name "new")
         legacy (assoc older .name "legacy")]
     (+ point.y older.y (count older.name) (count legacy.name))))`
@@ -1947,15 +2109,15 @@ compile_shallow_struct_assoc_exprs :: proc(t: ^testing.T) {
 compile_nested_struct_assoc_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Profile {
+(defstruct Profile [
   name: string
   age: int
-})
+])
 
-(defstruct User {
+(defstruct User [
   profile: Profile
   active?: bool
-})
+])
 
 (defn inc [x: int] -> int
   (+ x 1))
@@ -1985,11 +2147,11 @@ compile_threaded_shallow_struct_assoc_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
-(defstruct User {
+(defstruct User [
   name: string
   age: int
   active?: bool
-})
+])
 
 (defn score [user: User] -> int
   (let [updated (-> user
@@ -2015,15 +2177,15 @@ compile_threaded_nested_struct_assoc_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
-(defstruct Profile {
+(defstruct Profile [
   name: string
   age: int
-})
+])
 
-(defstruct User {
+(defstruct User [
   profile: Profile
   active?: bool
-})
+])
 
 (defn score [user: User] -> int
   (let [updated (-> user
@@ -2048,16 +2210,16 @@ compile_threaded_shallow_struct_assoc_from_proc_return :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
-(defstruct User {
+(defstruct User [
   name: string
   age: int
-})
+])
 
 (defn inc [x: int] -> int
   (+ x 1))
 
 (defn make-user [] -> User
-  (User {name: "Ada" age: 41}))
+  (User :name "Ada" :age 41))
 
 (defn score [] -> int
   (let [updated (-> (make-user)
@@ -2081,9 +2243,9 @@ compile_threaded_shallow_struct_update_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
-(defstruct User {
+(defstruct User [
   age: int
-})
+])
 
 (defn inc [x: int] -> int
   (+ x 1))
@@ -2108,9 +2270,9 @@ reject_threaded_shallow_struct_assoc_unknown_field :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
-(defstruct User {
+(defstruct User [
   age: int
-})
+])
 
 (defn bad [user: User] -> User
   (-> user
@@ -2130,9 +2292,9 @@ reject_threaded_shallow_struct_assoc_unknown_field :: proc(t: ^testing.T) {
 reject_shallow_struct_update_non_field_selector :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Point {
+(defstruct Point [
   x: int
-})
+])
 
 (defn bad [point: Point] -> Point
   (assoc point 1))`
@@ -2151,9 +2313,9 @@ reject_shallow_struct_update_non_field_selector :: proc(t: ^testing.T) {
 compile_shallow_struct_update_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Point {
+(defstruct Point [
   x: int
-})
+])
 
 (defn good [point: Point] -> Point
   (update point.x + 2))`
@@ -2176,13 +2338,13 @@ compile_nested_struct_update_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
-(defstruct Profile {
+(defstruct Profile [
   age: int
-})
+])
 
-(defstruct User {
+(defstruct User [
   profile: Profile
-})
+])
 
 (defn inc [x: int] -> int
   (+ x 1))
@@ -2205,13 +2367,13 @@ compile_nested_struct_update_exprs :: proc(t: ^testing.T) {
 compile_odin_shaped_type_spellings :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Raw-Types {
+(defstruct Raw-Types [
   values: []int
   fixed: [3]int
   buffer: [dynamic]int
   lookup: map[string]int
   next: ^Raw-Types
-})
+])
 
 (defn values [state: ^Raw-Types] -> []int
   state^.values)
@@ -2304,13 +2466,13 @@ compile_unparenthesized_fn_type_spelling :: proc(t: ^testing.T) {
   (fn [x: int] -> bool
     true))
 
-(defstruct Runner {
+(defstruct Runner [
   run: fn [x: int] -> bool
-})
+])
 
-(defunion Callback {
+(defunion Callback [
   pred: fn [x: int] -> bool
-})
+])
 
 (defn apply-pred [pred: fn [x: int] -> bool, x: int] -> bool
   (pred x))
@@ -2415,7 +2577,7 @@ compile_user_proc_supports_captured_callback_literal :: proc(t: ^testing.T) {
 
 @(test)
 compile_user_proc_supports_field_selector_callback :: proc(t: ^testing.T) {
-    source := "(package main)\n\n(defstruct User {name: string})\n\n(defn project-one [f: (fn [x: $T] -> $K), x: T] -> K\n  (f x))\n\n(defn demo [u: User] -> string\n  (project-one .name u))"
+    source := "(package main)\n\n(defstruct User [name: string])\n\n(defn project-one [f: (fn [x: $T] -> $K), x: T] -> K\n  (f x))\n\n(defn demo [u: User] -> string\n  (project-one .name u))"
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -2491,9 +2653,9 @@ identity_factory :: proc(f: proc(x: int) -> proc(y: int) -> bool) -> proc(x: int
 type_named_destroy_and_clone_do_not_create_a_protocol :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Handle {
+(defstruct Handle [
   raw: rawptr
-})
+])
 
 (defn Handle-destroy [handle: Handle]
   (discard handle))
@@ -2521,13 +2683,13 @@ type_named_destroy_and_clone_do_not_create_a_protocol :: proc(t: ^testing.T) {
 tracked_native_storage_moves_into_ordinary_struct_fields :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Box {
+(defstruct Box [
   values: [dynamic]int
-})
+])
 
 (defn use-box [] -> int
   (let [values (make [dynamic]int)
-        box (Box {values: values})]
+        box (Box :values values)]
     (defer (delete box.values))
     (count box.values)))`
 

@@ -4,15 +4,15 @@
 
 (defstruct Point
   "A small geometric point."
-  {x: float
-   y: float})
+  [x: float
+   y: float])
 
 (defstruct Profile
   "Example struct for metadata introspection."
-  {name: string
+  [name: string
    age: int
-   tags: (map string (struct {}))
-   home: Point})
+   tags: (map string (struct []))
+   home: Point])
 
 (defn struct-introspection-demo [] -> bool
   (println (soa.fields 'Profile))

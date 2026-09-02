@@ -84,14 +84,14 @@ The remaining differences are deliberate:
 Use a native struct when the shape is part of the compiled program:
 
 ```clojure
-(defstruct Contact {
+(defstruct Contact [
   name: string
   born: int
   active?: bool
-})
+])
 
 (defn contact [name: string, born: int] -> Contact
-  (Contact {name: name born: born active?: true}))
+  (Contact :name name :born born :active? true))
 ```
 
 Fields and types are checked statically. Native arrays and maps are similarly
@@ -209,9 +209,9 @@ attributes, and nested vectors are children:
      [:p "Ready"]]))
 ```
 
-`html.render` expects Data, so the literal is contextual Data and `title` is
-inserted normally. The document can be built, traversed, and transformed as
-data before it is rendered.
+`html.render` declares its argument as `Data`, so this vector literal constructs
+a `Data` value and inserts `title` normally. The document can be built,
+traversed, and transformed as data before it is rendered.
 
 ### Datomic Data
 
@@ -490,7 +490,8 @@ Nested operations use list or vector Data paths:
 (data.dissoc-in message [:request :credentials])
 ```
 
-The expected `Data` parameter makes ordinary vector syntax contextual Data.
+These functions declare the path parameter as `Data`, so the ordinary vector
+literal constructs a `Data` vector.
 `get-in` accepts an empty path and borrows the input. `assoc-in` and
 `update-in` require a non-empty path. Missing or nil intermediate map values
 become maps. `dissoc-in` preserves empty parents.
@@ -618,8 +619,8 @@ validated key uniqueness.
 
 More examples:
 
-- [contextual Data](../examples/data/contextual-data.kvist) - runtime values
-  inside Data literals
+- [Data from runtime values](../examples/data/contextual-data.kvist) - runtime
+  values inside Data literals
 - [EDN configuration](../examples/data/edn-config.kvist) - reading Data from
   text
 - [message pipeline](../examples/data/message-pipeline.kvist) - nested lookup,

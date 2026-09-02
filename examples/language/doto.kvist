@@ -1,11 +1,11 @@
 ;; Demonstrates doto for Odin-style mutating setup calls.
 (package main)
 
-(defstruct ServerConfig {
+(defstruct ServerConfig [
   port: int
   retries: int
   secure: bool
-})
+])
 
 (defn set-port! [cfg: ^ServerConfig, port: int]
   (set! cfg^.port port))
@@ -17,7 +17,7 @@
   (set! cfg^.secure true))
 
 (defn configured-port [] -> int
-  (let [cfg (ServerConfig {port: 8080 retries: 1 secure: false})]
+  (let [cfg (ServerConfig :port 8080 :retries 1 :secure false)]
     (let [configured (doto (addr cfg)
                        (set-port! 6969)
                        (set-retries! 3)

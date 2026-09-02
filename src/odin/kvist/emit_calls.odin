@@ -5,6 +5,160 @@ import "core:os"
 import "core:strings"
 import "core:time"
 
+Keyword_Args_Call_Mode :: enum {
+    Positional,
+    Named,
+    Ambiguous,
+}
+
+Keyword_Args_Call_Resolution :: struct {
+    mode:  Keyword_Args_Call_Mode,
+    split: int,
+}
+
+keyword_arg_tail_is_syntax :: proc(args: []CST_Form, start: int) -> bool {
+    if start < 0 || start >= len(args) || (len(args)-start)%2 != 0 {
+        return false
+    }
+    for i := start; i < len(args); i += 2 {
+        if args[i].kind != .Keyword || len(args[i].text) <= 1 {
+            return false
+        }
+    }
+    return true
+}
+
+first_keyword_arg_tail_start :: proc(args: []CST_Form) -> int {
+    for start in 0..<len(args) {
+        if keyword_arg_tail_is_syntax(args, start) {
+            return start
+        }
+    }
+    return -1
+}
+
+form_obviously_matches_expected_type :: proc(e: ^Emitter, form: CST_Form, expected_type: string) -> bool {
+    if strings.contains(expected_type, "$") || type_text_is_managed_value(e, expected_type) {
+        return true
+    }
+    #partial switch form.kind {
+    case .String, .Regex:
+        return expected_type == "string"
+    case .Bool:
+        return expected_type == "bool"
+    case .Keyword:
+        return expected_type == "keyword"
+    case .Number:
+        return is_numeric_scalar_type(expected_type)
+    case .Brace:
+        return type_text_is_map(expected_type)
+    case .Vector:
+        if _, ok_collection := collection_element_type(expected_type); ok_collection {
+            return !type_text_is_map(expected_type)
+        }
+        return false
+    case .Set:
+        _, ok_set := set_element_type(expected_type)
+        return ok_set
+    case:
+        return true
+    }
+}
+
+proc_positional_call_is_viable :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, args: []CST_Form) -> bool {
+    if !proc_accepts_positional_arg_count(proc_decl, len(args)) {
+        return false
+    }
+    for arg, idx in args {
+        if idx >= len(proc_decl.params) || !form_obviously_matches_expected_type(e, arg, proc_decl.params[idx].ty) {
+            return false
+        }
+    }
+    return true
+}
+
+proc_named_call_is_viable :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positional_args, named_args: []CST_Form) -> bool {
+    if len(positional_args) > len(proc_decl.params) || len(named_args) == 0 || len(named_args)%2 != 0 {
+        return false
+    }
+    provided := make([]bool, len(proc_decl.params))
+    defer delete(provided)
+    for idx in 0..<len(positional_args) {
+        if !form_obviously_matches_expected_type(e, positional_args[idx], proc_decl.params[idx].ty) {
+            return false
+        }
+        provided[idx] = true
+    }
+    for i := 0; i < len(named_args); i += 2 {
+        field_name, ok_key := brace_key_name(named_args[i])
+        if !ok_key {
+            return false
+        }
+        param_idx := -1
+        for param, idx in proc_decl.params {
+            if param.name == field_name {
+                param_idx = idx
+                break
+            }
+        }
+        if param_idx < 0 || provided[param_idx] ||
+           !form_obviously_matches_expected_type(e, named_args[i+1], proc_decl.params[param_idx].ty) {
+            return false
+        }
+        provided[param_idx] = true
+    }
+    for param, idx in proc_decl.params {
+        if !provided[idx] && !param.has_default {
+            return false
+        }
+    }
+    return true
+}
+
+keyword_args_call_resolution :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, args: []CST_Form) -> Keyword_Args_Call_Resolution {
+    positional_ok := proc_positional_call_is_viable(e, proc_decl, args)
+    viable_split := -1
+    viable_count := 0
+    diagnostic_split := -1
+
+    for start in 0..<len(args) {
+        if !keyword_arg_tail_is_syntax(args, start) {
+            continue
+        }
+        first_name, ok_first := brace_key_name(args[start])
+        if ok_first {
+            if _, ok_param := find_proc_param(proc_decl, first_name); ok_param && diagnostic_split < 0 {
+                diagnostic_split = start
+            }
+        }
+        if proc_named_call_is_viable(e, proc_decl, args[:start], args[start:]) {
+            viable_split = start
+            viable_count += 1
+        }
+    }
+
+    if viable_count > 1 || (viable_count == 1 && positional_ok) {
+        return Keyword_Args_Call_Resolution{mode = .Ambiguous, split = viable_split}
+    }
+    if viable_count == 1 {
+        return Keyword_Args_Call_Resolution{mode = .Named, split = viable_split}
+    }
+    if positional_ok {
+        return Keyword_Args_Call_Resolution{mode = .Positional, split = -1}
+    }
+    if diagnostic_split >= 0 {
+        return Keyword_Args_Call_Resolution{mode = .Named, split = diagnostic_split}
+    }
+    return Keyword_Args_Call_Resolution{mode = .Positional, split = -1}
+}
+
+ambiguous_keyword_args_call_error :: proc(span: Span) -> Compile_Error {
+    return Compile_Error{
+        message = "keyword arguments are ambiguous with positional keyword values; use (keyword :name) to make a positional keyword value explicit",
+        span = span,
+    }
+}
+
 type_text_needs_conversion_parens :: proc(text: string) -> bool {
     trimmed := strings.trim_space(text)
     if trimmed == "" {
@@ -562,7 +716,7 @@ proc_param_keyword_names :: proc(proc_decl: ^Proc_Decl) -> (names: [dynamic]stri
 }
 
 label_text :: proc(name: string) -> string {
-    return fmt.tprintf("%s:", name)
+    return fmt.tprintf(":%s", name)
 }
 
 join_strings :: proc(items: []string, sep: string) -> string {
@@ -758,28 +912,28 @@ missing_required_arg_error :: proc(proc_name, param_name: string, span: Span) ->
     }
 }
 
-emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, form: CST_Form) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
-    if form.kind != .Brace {
-        return arg_texts, Compile_Error{message = "named arguments expect a brace form", span = form.span}, false
+emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, named_args: []CST_Form, span: Span) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
+    if len(named_args) == 0 || len(named_args)%2 != 0 {
+        return arg_texts, Compile_Error{message = "named arguments use alternating :name value pairs", span = span}, false
     }
 
-    named_values := make([dynamic]Brace_Pair, 0, len(form.items)/2)
+    named_values := make([dynamic]Brace_Pair, 0, len(named_args)/2)
     defer delete(named_values)
-    provided_names := make([dynamic]string, 0, len(form.items)/2)
+    provided_names := make([dynamic]string, 0, len(named_args)/2)
     defer delete(provided_names)
-    provided_forms := make([dynamic]CST_Form, 0, len(form.items)/2)
+    provided_forms := make([dynamic]CST_Form, 0, len(named_args)/2)
     defer delete(provided_forms)
 
     seen: [dynamic]string
-    for i := 0; i < len(form.items); i += 2 {
-        if i+1 >= len(form.items) {
-            return arg_texts, Compile_Error{message = "missing named argument value", span = form.span}, false
+    for i := 0; i < len(named_args); i += 2 {
+        if i+1 >= len(named_args) {
+            return arg_texts, Compile_Error{message = "missing named argument value", span = span}, false
         }
-        key := form.items[i]
-        value := form.items[i+1]
+        key := named_args[i]
+        value := named_args[i+1]
         field_name, ok_key := brace_key_name(key)
         if !ok_key {
-            return arg_texts, Compile_Error{message = "named arguments expect field: labels", span = key.span}, false
+            return arg_texts, keyword_key_error(key, "named arguments use alternating keyword/value pairs such as :name value"), false
         }
         for existing in seen {
             if existing == field_name {
@@ -832,7 +986,7 @@ emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, form: 
             append(&arg_texts, fmt.tprintf("%s = %s", param.name, default_text))
             continue
         }
-        return arg_texts, missing_required_arg_error(proc_decl.name, param.name, form.span), false
+        return arg_texts, missing_required_arg_error(proc_decl.name, param.name, span), false
     }
 
     return arg_texts, Compile_Error{}, true
@@ -916,7 +1070,7 @@ emit_positional_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, a
     return arg_texts, Compile_Error{}, true
 }
 
-emit_general_mixed_call_arg_texts :: proc(e: ^Emitter, head_name: string, positional_args: []CST_Form, named_form: CST_Form) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
+emit_general_mixed_call_arg_texts :: proc(e: ^Emitter, head_name: string, positional_args, named_args: []CST_Form, span: Span) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
     for arg, arg_idx in positional_args {
         arg_text := ""
         err_arg: Compile_Error
@@ -933,7 +1087,7 @@ emit_general_mixed_call_arg_texts :: proc(e: ^Emitter, head_name: string, positi
         append(&arg_texts, arg_text)
     }
 
-    named_arg_texts, err_named, ok_named := emit_named_call_arg_texts(e, named_form)
+    named_arg_texts, err_named, ok_named := emit_named_call_arg_texts(e, named_args, span)
     if !ok_named {
         return arg_texts, err_named, false
     }
@@ -950,28 +1104,28 @@ dotted_head_member_starts_upper :: proc(head_name: string) -> bool {
     return ch >= 'A' && ch <= 'Z'
 }
 
-emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positional_args: []CST_Form, named_form: CST_Form, span: Span) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
+emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positional_args, named_args: []CST_Form, span: Span) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
     if len(positional_args) > len(proc_decl.params) {
         return arg_texts, Compile_Error{message = fmt.tprintf("%s expects at most %d arguments", proc_decl.name, len(proc_decl.params)), span = span}, false
     }
 
-    named_values := make([dynamic]Brace_Pair, 0, len(named_form.items)/2)
+    named_values := make([dynamic]Brace_Pair, 0, len(named_args)/2)
     defer delete(named_values)
-    provided_names := make([dynamic]string, 0, len(positional_args)+len(named_form.items)/2)
+    provided_names := make([dynamic]string, 0, len(positional_args)+len(named_args)/2)
     defer delete(provided_names)
-    provided_forms := make([dynamic]CST_Form, 0, len(positional_args)+len(named_form.items)/2)
+    provided_forms := make([dynamic]CST_Form, 0, len(positional_args)+len(named_args)/2)
     defer delete(provided_forms)
 
     seen: [dynamic]string
-    for i := 0; i < len(named_form.items); i += 2 {
-        if i+1 >= len(named_form.items) {
-            return arg_texts, Compile_Error{message = "missing named argument value", span = named_form.span}, false
+    for i := 0; i < len(named_args); i += 2 {
+        if i+1 >= len(named_args) {
+            return arg_texts, Compile_Error{message = "missing named argument value", span = span}, false
         }
-        key := named_form.items[i]
-        value := named_form.items[i+1]
+        key := named_args[i]
+        value := named_args[i+1]
         field_name, ok_key := brace_key_name(key)
         if !ok_key {
-            return arg_texts, Compile_Error{message = "named arguments expect field: labels", span = key.span}, false
+            return arg_texts, Compile_Error{message = "named arguments use alternating keyword/value pairs such as :name value", span = key.span}, false
         }
         for existing in seen {
             if existing == field_name {
@@ -1009,7 +1163,7 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
         }
         for pair in named_values {
             if pair.key == param.name {
-                return arg_texts, Compile_Error{message = fmt.tprintf("named argument %s overlaps positional argument %d", label_text(param.name), idx+1), span = named_form.span}, false
+                return arg_texts, Compile_Error{message = fmt.tprintf("named argument %s overlaps positional argument %d", label_text(param.name), idx+1), span = span}, false
             }
         }
         append(&arg_texts, arg_text)
@@ -1041,7 +1195,7 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
             append(&arg_texts, fmt.tprintf("%s = %s", param.name, default_text))
             continue
         }
-        return arg_texts, missing_required_arg_error(proc_decl.name, param.name, named_form.span), false
+        return arg_texts, missing_required_arg_error(proc_decl.name, param.name, span), false
     }
 
     return arg_texts, Compile_Error{}, true

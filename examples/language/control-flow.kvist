@@ -10,23 +10,23 @@
   Delete
 ])
 
-(defstruct Connected {
+(defstruct Connected [
   id: int
-})
+])
 
-(defstruct Disconnected {
+(defstruct Disconnected [
   reason: string
-})
+])
 
-(defstruct Data {
+(defstruct Data [
   payload: string
-})
+])
 
-(defunion Event {
+(defunion Event [
   connected: Connected
   disconnected: Disconnected
   data: Data
-})
+])
 
 (defn read-method? [method: Method] -> bool
   (case method
@@ -117,7 +117,7 @@
 
 (defn main []
   (let [xs (arr.dynamic int [1 2 3])
-        event (Event {connected: (Connected {id: 7})})]
+        event (Event :connected (Connected :id 7))]
     (defer (delete xs))
     (println (classify (sum (slice xs))) (method-name .Get) (event-score event))))
 
@@ -143,10 +143,10 @@
   (adjusted-score 41)
   ;; => 42
 
-  (event-score (Event {connected: (Connected {id: 7})}))
+  (event-score (Event :connected (Connected :id 7)))
   ;; => 7
 
-  (event-score (Event {data: (Data {payload: "hello"})}))
+  (event-score (Event :data (Data :payload "hello")))
   ;; => 5
 
   (sum [1 2 3 4 5 6])

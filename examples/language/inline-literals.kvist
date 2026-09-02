@@ -17,8 +17,8 @@
   (let [xs: [dynamic]int [] :defer
         lookup: map[string]int {} :defer
         states: map[keyword]int {} :defer
-        tags: (map string (struct {})) #{} :defer
-        modes: (map keyword (struct {})) #{} :defer]
+        tags: (map string (struct [])) #{} :defer
+        modes: (map keyword (struct [])) #{} :defer]
     (println lookup states tags modes)
     (arr.count xs)))
 

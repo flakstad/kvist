@@ -5,15 +5,15 @@
 
 (defstruct Person
   "A small fixed-shape person struct."
-  {name: string
+  [name: string
    age: int
-   tags: (map string (struct {}))})
+   tags: (map string (struct []))])
 
 (defn records-demo [] -> bool
   (let [tags (set.empty string 2) :defer
-        person (Person {name: "Ada"
-                        age: 36
-                        tags: tags})]
+        person (Person :name "Ada"
+                        :age 36
+                        :tags tags)]
     (set.add! tags "math")
     (set.add! tags "lisp")
     (println person.name)

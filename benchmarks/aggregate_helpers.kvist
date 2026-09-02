@@ -8,19 +8,19 @@
 (odin "ORDER_N :: 75_000
 ORDER_REPS :: 40")
 
-(defstruct Order {
+(defstruct Order [
   account: int
   amount: int
   discount: int
   status: int
   region: int
-})
+])
 
-(defstruct Region-Report {
+(defstruct Region-Report [
   region: int
   revenue: int
   count: int
-})
+])
 
 (odin "make_orders :: proc(n: int) -> [dynamic]Order {
     out := make([dynamic]Order, 0, n)
@@ -60,9 +60,9 @@ ORDER_REPS :: 40")
   (let [rows (make [dynamic]Region-Report)]
     (for [region revenue revenue-by-region]
       (append (addr rows)
-              (Region-Report {region: region
-                              revenue: revenue
-                              count: (get count-by-region region 0)})))
+              (Region-Report :region region
+                              :revenue revenue
+                              :count (get count-by-region region 0))))
     (arr.sort-by! .revenue rows)
     rows))
 
@@ -89,9 +89,9 @@ ORDER_REPS :: 40")
               (for [order group]
                 (set! revenue (+ revenue order.amount)))
               (append (addr rows)
-                      (Region-Report {region: region
-                                      revenue: revenue
-                                      count: (len group)}))))
+                      (Region-Report :region region
+                                      :revenue revenue
+                                      :count (len group)))))
           (arr.sort-by! .revenue rows)
           (set! checksum (+ checksum (report-checksum (slice rows))))
           (for [_ group groups]

@@ -42,7 +42,7 @@ arr__sort_by_items_bang :: proc(items: []arr__Sort_By_Item($K, $T)) {
   (let [items (arr.empty (arr__Sort_By_Item K T) (core.count xs)) :defer
         out (arr.empty T (core.count xs))]
     (for [x xs]
-      (append (addr items) ((arr__Sort_By_Item K T) {key: (f x) value: x})))
+      (append (addr items) ((arr__Sort_By_Item K T) :key (f x) :value x)))
     (arr__sort_by_items_bang (core.slice items 0))
     (for [item items]
       (append (addr out) item.value))
@@ -52,7 +52,7 @@ arr__sort_by_items_bang :: proc(items: []arr__Sort_By_Item($K, $T)) {
   [f: (fn [x: $T] -> $K), xs: []T] #force_inline
   (let [items (arr.empty (arr__Sort_By_Item K T) (core.count xs)) :defer]
     (for [x xs]
-      (append (addr items) ((arr__Sort_By_Item K T) {key: (f x) value: x})))
+      (append (addr items) ((arr__Sort_By_Item K T) :key (f x) :value x)))
     (arr__sort_by_items_bang (core.slice items 0))
     (for [item i items]
       (set! (core.get xs i) item.value))))

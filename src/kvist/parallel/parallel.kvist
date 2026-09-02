@@ -121,17 +121,17 @@
   (map-form worker xs 0))
 
 (defmacro map-with
-  "Like `map`, but accepts `{workers: n}` to control the worker count."
+  "Like `map`, but accepts `{:workers n}` to control the worker count."
   [options worker xs]
   (if (brace? options)
     (if (= (count options) 0)
-        (error "parallel.map-with expects {workers: n}")
+        (error "parallel.map-with expects {:workers n}")
       (if (= (count options) 2)
         (if (= (name (first options)) "workers")
           (map-form worker xs (nth options 1))
           (error (str "parallel.map-with unknown option: " (name (first options)))))
         (error "parallel.map-with expects option key/value pairs")))
-    (error "parallel.map-with expects options like {workers: n}")))
+    (error "parallel.map-with expects options like {:workers n}")))
 
 (defmacro for
   "Apply a named or inline one-argument side-effecting `worker` to every item in
@@ -140,14 +140,14 @@
   (for-form worker xs 0))
 
 (defmacro for-with
-  "Like `for`, but accepts `{workers: n}` to control the worker count."
+  "Like `for`, but accepts `{:workers n}` to control the worker count."
   [options worker xs]
   (if (brace? options)
     (if (= (count options) 0)
-        (error "parallel.for-with expects {workers: n}")
+        (error "parallel.for-with expects {:workers n}")
       (if (= (count options) 2)
         (if (= (name (first options)) "workers")
           (for-form worker xs (nth options 1))
           (error (str "parallel.for-with unknown option: " (name (first options)))))
         (error "parallel.for-with expects option key/value pairs")))
-    (error "parallel.for-with expects options like {workers: n}")))
+    (error "parallel.for-with expects options like {:workers n}")))

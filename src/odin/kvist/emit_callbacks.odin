@@ -757,6 +757,70 @@ collect_proc_literal_captures_from_form :: proc(e: ^Emitter, form: CST_Form, bou
         if len(form.items) > 0 && is_symbol(form.items[0], "fn") {
             return
         }
+        if len(form.items) >= 3 &&
+           is_symbol(form.items[0], "for") &&
+           form.items[1].kind == .Vector {
+            binding := form.items[1]
+            collection_index := -1
+            bound_count := 0
+            transform_index := -1
+            switch len(binding.items) {
+            case 2:
+                collection_index = 1
+                bound_count = 1
+            case 3:
+                collection_index = 2
+                bound_count = 2
+            case 4:
+                if binding.items[2].kind == .Keyword && binding.items[2].text == ":transform" {
+                    collection_index = 1
+                    bound_count = 1
+                    transform_index = 3
+                }
+            case 5:
+                if binding.items[3].kind == .Keyword && binding.items[3].text == ":transform" {
+                    collection_index = 2
+                    bound_count = 2
+                    transform_index = 4
+                }
+            }
+            if collection_index >= 0 {
+                collect_proc_literal_captures_from_form(
+                    e,
+                    binding.items[collection_index],
+                    bound_names,
+                    captures,
+                )
+                if transform_index >= 0 {
+                    collect_proc_literal_captures_from_form(
+                        e,
+                        binding.items[transform_index],
+                        bound_names,
+                        captures,
+                    )
+                }
+                loop_bound: [dynamic]string
+                for name in bound_names {
+                    append(&loop_bound, name)
+                }
+                for target in binding.items[:bound_count] {
+                    if target.kind == .Symbol {
+                        append(&loop_bound, map_name(target.text))
+                    } else if target.kind == .Vector || target.kind == .Brace {
+                        pattern_names: [dynamic]string
+                        if _, ok_pattern := validate_data_pattern_names(target, &pattern_names, true); ok_pattern {
+                            append(&loop_bound, ..pattern_names[:])
+                        }
+                        delete(pattern_names)
+                    }
+                }
+                for item in form.items[2:] {
+                    collect_proc_literal_captures_from_form(e, item, loop_bound[:], captures)
+                }
+                delete(loop_bound)
+                return
+            }
+        }
         if len(form.items) >= 4 && is_symbol(form.items[0], "match") {
             collect_proc_literal_captures_from_form(e, form.items[1], bound_names, captures)
             for i := 2; i+1 < len(form.items); i += 2 {
@@ -1678,13 +1742,6 @@ emit_struct_types_literal :: proc(struct_decl: ^Struct_Decl) -> string {
     return strings.clone(strings.to_string(builder))
 }
 
-brace_key_name :: proc(form: CST_Form) -> (string, bool) {
-    if form.kind == .Symbol && len(form.text) > 1 && form.text[len(form.text)-1] == ':' {
-        return map_name(form.text[:len(form.text)-1]), true
-    }
-    return "", false
-}
-
 number_looks_float :: proc(text: string) -> bool {
     for ch in text {
         if ch == '.' || ch == 'e' || ch == 'E' {
@@ -1724,45 +1781,11 @@ literal_matches_struct_field_type :: proc(e: ^Emitter, ty: string, value: CST_Fo
     }
 
     nested_struct, ok_nested := find_struct_decl(e, ty)
-    if ok_nested && value.kind == .List && len(value.items) == 2 && value.items[0].kind == .Symbol && map_name(value.items[0].text) == nested_struct.name && value.items[1].kind == .Brace {
+    if ok_nested && value.kind == .List && len(value.items) >= 1 && value.items[0].kind == .Symbol && map_name(value.items[0].text) == nested_struct.name {
         return true
     }
 
     return true
-}
-
-validate_struct_constructor :: proc(e: ^Emitter, struct_decl: ^Struct_Decl, form: CST_Form) -> (Compile_Error, bool) {
-    if form.kind != .Brace {
-        return Compile_Error{message = "struct construction expects a brace form", span = form.span}, false
-    }
-
-    seen: [dynamic]string
-    for i := 0; i < len(form.items); i += 2 {
-        if i+1 >= len(form.items) {
-            return Compile_Error{message = "missing struct constructor value", span = form.span}, false
-        }
-        key := form.items[i]
-        value := form.items[i+1]
-        field_name, ok_key := brace_key_name(key)
-        if !ok_key {
-            return Compile_Error{message = "struct construction expects labeled fields", span = key.span}, false
-        }
-        for existing in seen {
-            if existing == field_name {
-                return Compile_Error{message = fmt.tprintf("duplicate struct constructor field %s", key.text), span = key.span}, false
-            }
-        }
-        append(&seen, field_name)
-        field, ok_field := find_struct_field(struct_decl, field_name)
-        if !ok_field {
-            return Compile_Error{message = fmt.tprintf("unknown struct constructor field %s", key.text), span = key.span}, false
-        }
-        if !literal_matches_struct_field_type(e, field.ty, value) {
-            return Compile_Error{message = fmt.tprintf("struct constructor literal type mismatch for %s", key.text), span = value.span}, false
-        }
-    }
-
-    return Compile_Error{}, true
 }
 
 is_numeric_scalar_type :: proc(text: string) -> bool {
@@ -1774,19 +1797,16 @@ is_numeric_scalar_type :: proc(text: string) -> bool {
     }
 }
 
-emit_union_constructor :: proc(e: ^Emitter, union_decl: ^Union_Decl, arg: CST_Form) -> (string, Compile_Error, bool) {
-    if arg.kind != .Brace {
-        return "", Compile_Error{message = "union construction expects a brace form", span = arg.span}, false
-    }
-    if len(arg.items) != 2 {
-        return "", Compile_Error{message = "union construction expects exactly one variant", span = arg.span}, false
+emit_union_named_constructor :: proc(e: ^Emitter, union_decl: ^Union_Decl, args: []CST_Form, span: Span) -> (string, Compile_Error, bool) {
+    if len(args) != 2 {
+        return "", Compile_Error{message = "named union construction expects exactly one :variant value pair", span = span}, false
     }
 
-    key := arg.items[0]
-    value := arg.items[1]
+    key := args[0]
+    value := args[1]
     variant_name, ok_key := brace_key_name(key)
     if !ok_key {
-        return "", Compile_Error{message = "union construction expects a variant label", span = key.span}, false
+        return "", Compile_Error{message = "union construction expects a prefix keyword variant such as :value", span = key.span}, false
     }
 
     found := false
@@ -1802,12 +1822,35 @@ emit_union_constructor :: proc(e: ^Emitter, union_decl: ^Union_Decl, arg: CST_Fo
         return "", Compile_Error{message = "unknown union variant", span = key.span}, false
     }
 
-    value_text, err_value, ok_value := emit_expr(e, value)
+    value_text, err_value, ok_value := emit_expr_for_expected_type(e, value, variant_ty)
     if !ok_value {
         return "", err_value, false
     }
     if value.kind == .Number && is_numeric_scalar_type(variant_ty) {
         value_text = fmt.tprintf("%s(%s)", variant_ty, value_text)
+    }
+    return fmt.tprintf("%s(%s)", union_decl.name, value_text), {}, true
+}
+
+emit_union_positional_constructor :: proc(e: ^Emitter, union_decl: ^Union_Decl, value: CST_Form) -> (string, Compile_Error, bool) {
+    matching_type := ""
+    matches := 0
+    for variant in union_decl.variants {
+        if literal_matches_struct_field_type(e, variant.ty, value) {
+            matching_type = variant.ty
+            matches += 1
+        }
+    }
+    value_text := ""
+    err_value: Compile_Error
+    ok_value := false
+    if matches == 1 {
+        value_text, err_value, ok_value = emit_expr_for_expected_type(e, value, matching_type)
+    } else {
+        value_text, err_value, ok_value = emit_expr(e, value)
+    }
+    if !ok_value {
+        return "", err_value, false
     }
     return fmt.tprintf("%s(%s)", union_decl.name, value_text), {}, true
 }

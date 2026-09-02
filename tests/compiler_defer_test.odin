@@ -14,9 +14,9 @@ reject_defer_owned_let_branch_case_return :: proc(t: ^testing.T) {
 
 (defenum Step-Kind [One Two])
 
-(defstruct Step {
+(defstruct Step [
   kind: Step-Kind
-})
+])
 
 (defn owned-from-case [step: Step] -> [dynamic]int
   (case step.kind
@@ -443,13 +443,13 @@ reject_returning_defer_binding :: proc(t: ^testing.T) {
 reject_returning_defer_binding_inside_struct_literal :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Box {
+(defstruct Box [
   xs: [dynamic]int
-})
+])
 
 (defn owned [] -> Box
   (let [xs ([dynamic]int [1 2]) :defer]
-    (Box {xs: xs})))`
+    (Box :xs xs)))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -479,22 +479,22 @@ compile_defer_binding_passed_as_borrowed_slice_to_copied_result :: proc(t: ^test
     source := `(package main)
 (import arr "kvist:arr")
 
-(defstruct Query {
+(defstruct Query [
   xs: [dynamic]int
-})
+])
 
-(defstruct Result {
+(defstruct Result [
   query: Query
-})
+])
 
 (defn copy-query [xs: []int] -> Query
   (let [out (make [dynamic]int)]
     (arr.into! out xs)
-    (Query {xs: out})))
+    (Query :xs out)))
 
 (defn ok [] -> Result
   (let [xs ([dynamic]int [1 2]) :defer]
-    (Result {query: (copy-query (slice xs 0))})))`
+    (Result :query (copy-query (slice xs 0)))))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -512,13 +512,13 @@ compile_defer_binding_passed_as_borrowed_slice_to_copied_result :: proc(t: ^test
 reject_returning_defer_binding_through_local_wrapper :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Box {
+(defstruct Box [
   xs: [dynamic]int
-})
+])
 
 (defn owned [] -> Box
   (let [xs ([dynamic]int [1 2]) :defer
-        box (Box {xs: xs})]
+        box (Box :xs xs)]
     box))`
 
     _, err, ok := kvist.compile_source(source)
@@ -531,14 +531,14 @@ reject_returning_defer_binding_through_local_wrapper :: proc(t: ^testing.T) {
 reject_returning_defer_binding_through_set_bang_wrapper :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Box {
+(defstruct Box [
   xs: [dynamic]int
-})
+])
 
 (defn owned [] -> Box
   (let [xs ([dynamic]int [1 2]) :defer
-        box (Box {xs: ([dynamic]int [])})]
-    (set! box (Box {xs: xs}))
+        box (Box :xs ([dynamic]int []))]
+    (set! box (Box :xs xs))
     box))`
 
     _, err, ok := kvist.compile_source(source)
@@ -551,16 +551,16 @@ reject_returning_defer_binding_through_set_bang_wrapper :: proc(t: ^testing.T) {
 reject_returning_defer_binding_in_final_if_points_to_alias_branch :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Box {
+(defstruct Box [
   xs: [dynamic]int
-})
+])
 
 (defn owned [flag: bool] -> Box
   (let [xs ([dynamic]int [1 2]) :defer
-        box (Box {xs: xs})]
+        box (Box :xs xs)]
     (if flag
       box
-      (Box {xs: ([dynamic]int [])}))))`
+      (Box :xs ([dynamic]int [])))))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -1032,18 +1032,18 @@ warn_defer_third_party_type_case_assignment_borrowed_view :: proc(t: ^testing.T)
     pkg_source := `(package support)
 (import strings "core:strings")
 
-(defstruct Prefix {
+(defstruct Prefix [
   marker: string
-})
+])
 
-(defstruct Suffix {
+(defstruct Suffix [
   marker: string
-})
+])
 
-(defunion TrimMode {
+(defunion TrimMode [
   prefix: Prefix
   suffix: Suffix
-})
+])
 
 (defn trim-mode [mode: TrimMode s: string] -> string #force_inline
   (let [view ""]

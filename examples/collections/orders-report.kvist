@@ -4,19 +4,19 @@
 (import arr "kvist:arr")
 (import map "kvist:map")
 
-(defstruct Order {
+(defstruct Order [
   id: int
   region: keyword
   amount: int
   discount: int
   status: keyword
-})
+])
 
-(defstruct Region-Report {
+(defstruct Region-Report [
   region: keyword
   revenue: int
   count: int
-})
+])
 
 (def Order-Groups map[keyword][dynamic]Order)
 
@@ -48,11 +48,11 @@
     total))
 
 (defn sample-orders [] -> [dynamic]Order
-  (arr.dynamic Order [(Order {id: 1 region: :region/north amount: 80 discount: 5 status: :order/draft})
-                      (Order {id: 2 region: :region/west amount: 250 discount: 20 status: :order/authorized})
-                      (Order {id: 3 region: :region/west amount: 140 discount: 10 status: :order/authorized})
-                      (Order {id: 4 region: :region/south amount: 90 discount: 0 status: :order/settled})
-                      (Order {id: 5 region: :region/south amount: 410 discount: 35 status: :order/authorized})]))
+  (arr.dynamic Order [(Order :id 1 :region :region/north :amount 80 :discount 5 :status :order/draft)
+                      (Order :id 2 :region :region/west :amount 250 :discount 20 :status :order/authorized)
+                      (Order :id 3 :region :region/west :amount 140 :discount 10 :status :order/authorized)
+                      (Order :id 4 :region :region/south :amount 90 :discount 0 :status :order/settled)
+                      (Order :id 5 :region :region/south :amount 410 :discount 35 :status :order/authorized)]))
 
 (defn rows-from-groups [groups: Order-Groups] -> [dynamic]Region-Report
   (let [rows (arr.empty Region-Report)]
@@ -61,9 +61,9 @@
         (for [order group]
           (set! revenue (+ revenue order.amount)))
         (arr.push! rows
-          (Region-Report {region: region
-                          revenue: revenue
-                          count: (count group)}))))
+          (Region-Report :region region
+                          :revenue revenue
+                          :count (count group)))))
     (arr.sort-by! .revenue rows)
     rows))
 
@@ -71,9 +71,9 @@
   (let [rows (arr.empty Region-Report)]
     (for [region revenue revenue-by-region]
       (arr.push! rows
-        (Region-Report {region: region
-                        revenue: revenue
-                        count: (get count-by-region region 0)})))
+        (Region-Report :region region
+                        :revenue revenue
+                        :count (get count-by-region region 0))))
     (arr.sort-by! .revenue rows)
     rows))
 

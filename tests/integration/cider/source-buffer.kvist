@@ -4,9 +4,9 @@
 
 (+ cider-source-value 2)
 
-(defstruct CiderGreeting {
+(defstruct CiderGreeting [
   message: string
-})
+])
 
 (defn cider-greeting-length [message: string] -> int
   (count message))

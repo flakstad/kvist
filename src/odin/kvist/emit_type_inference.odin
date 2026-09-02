@@ -186,11 +186,15 @@ infer_literal_value_type :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
         }
         return fmt.tprintf("map[%s]struct{{}}", elem_ty), Compile_Error{}, true
     case .List:
-        if len(form.items) == 2 && form.items[0].kind == .Symbol && form.items[1].kind == .Brace {
+        if len(form.items) >= 1 && form.items[0].kind == .Symbol {
             head_name := map_name(form.items[0].text)
             if _, ok := find_struct_decl(e, head_name); ok {
                 return head_name, Compile_Error{}, true
             }
+            if _, ok := find_union_decl(e, head_name); ok {
+                return head_name, Compile_Error{}, true
+            }
+            delete(head_name)
         }
         return "", Compile_Error{message = "cannot infer inline literal type from this expression", span = form.span}, false
     case .Nil:
@@ -627,14 +631,15 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
             }
         }
     }
-    if form.kind == .List &&
-       len(form.items) == 2 &&
-       form.items[0].kind == .Symbol &&
-       (form.items[1].kind == .Vector || form.items[1].kind == .Brace) {
+    if form.kind == .List && len(form.items) >= 1 && form.items[0].kind == .Symbol {
         head_name := map_name(form.items[0].text)
         if _, ok := find_struct_decl(e, head_name); ok {
             return head_name, true
         }
+        if _, ok := find_union_decl(e, head_name); ok {
+            return head_name, true
+        }
+        delete(head_name)
     }
     if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
         if len(form.items) == 2 &&
@@ -667,6 +672,9 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
         }
         if is_symbol(form.items[0], "type") && len(form.items) == 2 {
             return "keyword", true
+        }
+        if is_symbol(form.items[0], "zero-of") && len(form.items) == 2 {
+            return obvious_form_type(e, form.items[1])
         }
         if is_symbol(form.items[0], "if") && len(form.items) == 4 {
             then_ty, ok_then_ty := obvious_form_type(e, form.items[2])
@@ -847,7 +855,10 @@ emit_inferred_literal :: proc(e: ^Emitter, form: CST_Form, expected_type := "") 
             }
             prefix = inferred
         } else if !type_text_is_map(prefix) {
-            return emit_brace_literal(e, prefix, form)
+            return "", Compile_Error{
+                message = fmt.tprintf("map literal does not match expected type %s; maps are always single values", prefix),
+                span = form.span,
+            }, false
         }
         mark_dynamic_literals(e)
         return emit_brace_literal(e, prefix, form)
@@ -889,15 +900,6 @@ emit_typed_literal_value :: proc(e: ^Emitter, type_form: CST_Form, type_text: st
         text, err, ok := emit_vector_literal(e, type_text, value)
         return text, err, ok, true
     case .Brace:
-        struct_decl, ok_struct := find_struct_decl(e, type_text)
-        if ok_struct {
-            err_struct, ok_struct_ctor := validate_struct_constructor(e, struct_decl, value)
-            if !ok_struct_ctor {
-                return "", err_struct, false, true
-            }
-            text, err, ok := emit_struct_brace_literal(e, struct_decl, value)
-            return text, err, ok, true
-        }
         text, err, ok := emit_inferred_literal(e, value, type_text)
         return text, err, ok, true
     case .Set:
@@ -1055,11 +1057,15 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
     if ty, ok := obvious_form_type(e, binding.value); ok {
         return ty, true
     }
-    if binding.value.kind == .List && len(binding.value.items) == 2 && binding.value.items[0].kind == .Symbol && binding.value.items[1].kind == .Brace {
+    if binding.value.kind == .List && len(binding.value.items) >= 1 && binding.value.items[0].kind == .Symbol {
         head_name := map_name(binding.value.items[0].text)
         if _, ok := find_struct_decl(e, head_name); ok {
             return head_name, true
         }
+        if _, ok := find_union_decl(e, head_name); ok {
+            return head_name, true
+        }
+        delete(head_name)
     }
     if binding.value.kind == .List && len(binding.value.items) >= 2 && binding.value.items[0].kind == .Symbol {
         head := binding.value.items[0].text

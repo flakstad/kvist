@@ -87,7 +87,8 @@ Kvist uses Clojure-style reader syntax:
 - `(head args...)` for calls and language forms
 - `[...]` for bindings, parameters, positional aggregates, and collection
   literals
-- `{...}` for labeled aggregates and map literals
+- `{...}` for map-shaped literals; keyword keys use prefix syntax such as
+  `{:name "Ada"}`
 - `#{...}` for set literals
 
 Whitespace and commas are interchangeable separators. Strings may span lines.
@@ -138,7 +139,7 @@ without imports. The filename does not create another namespace.
 (import users "users")
 
 (defn main []
-  (println (users.display-name (users.User {name: "Ada"}))))
+  (println (users.display-name (users.User :name "Ada"))))
 ```
 
 `package` is optional only for the root source passed to `kvist`; omitted root
@@ -194,16 +195,16 @@ The main declaration forms are:
 (def Max-Retries 3)            ; immutable value or type alias
 (defvar request-count 0)       ; mutable value
 
-(defstruct User {
+(defstruct User [
   name: string
   active?: bool
-})
+])
 
 (defenum State [Pending Ready Failed])
-(defunion Result {
+(defunion Result [
   user: User
   error: string
-})
+])
 
 (defn greet [user: User] -> string
   (str "Hello, " user.name))
@@ -232,6 +233,27 @@ The punctuation has conventions:
   `user.name`
 - operator symbols such as `+`, `<=`, and `bit.and` are used in call position
 
+A type annotation has the full form `name : Type`:
+
+```clojure
+(def answer : int 42)
+```
+
+Because the separator follows the name, it can be attached to that name as the
+shorthand `name: Type`. The shorthand is canonical and is used throughout the
+rest of this documentation:
+
+```clojure
+(def answer: int 42)
+(defn greet [name: string, punctuation: string :default "!"] -> string
+  (+ name punctuation))
+```
+
+A prefix `:` always introduces a keyword value or a keyword syntax marker:
+`:name`, `:job/queued`, and `:default`. The full form makes the underlying
+separator visible; the canonical shorthand attaches that separator to the
+preceding name. Neither form is a keyword.
+
 Field access and package access use dot syntax:
 
 ```clojure
@@ -248,11 +270,11 @@ Keywords are ordinary values of type `keyword`. They are useful for lightweight
 symbolic data in otherwise Odin-shaped code:
 
 ```clojure
-(defstruct Config {
+(defstruct Config [
   mode: keyword
-})
+])
 
-(Config {mode: :env/dev})
+(Config :mode :env/dev)
 ```
 
 Kvist still uses specific keyword literals positionally in some forms. For
@@ -415,7 +437,7 @@ compile or match APIs. For scoped locals, use `:defer-with`:
 ### Keywords
 
 `keyword` is a symbolic scalar for tags, modes, states, and other
-closed-world labels:
+closed-world values:
 
 ```clojure
 :dev
@@ -438,14 +460,18 @@ Keywords may include `/` for Clojure-style grouping, such as `:job/queued` or
 `:http/status`. The namespace part is ordinary data, not package or import
 resolution.
 
+Keyword lookup applies to `Data` maps, not native struct fields. Use
+`user.name` or the `.name` field selector for a native struct; use
+`(:name value)` or `(value :name)` for a `Data` map.
+
 Use `keyword` when the value is symbolic and stable:
 
 ```clojure
-(defstruct Result {
+(defstruct Result [
   status: keyword
-})
+])
 
-(Result {status: :ok})
+(Result :status :ok)
 ```
 
 Prefer `string` when the value is user-facing text, open-ended input, or needs
@@ -549,26 +575,59 @@ when locally owned.
 Structs group named fields into one concrete value:
 
 ```clojure
-(defstruct User {
+(defstruct User [
   name: string
   age: int
-})
+])
 
-(User {name: "Ada" age: 36})
+(User :name "Ada" :age 36)
 ```
 
 Struct values are copied by value unless passed through a pointer.
 Omitted fields in a struct literal use Odin zero values.
 
+Structs have three constructor forms:
+
+```clojure
+(User "Ada" 36)                  ; positional fields
+(User :age 36 :name "Ada")      ; named fields
+(User ["Ada" 36])                ; positional aggregate
+```
+
+Direct positional values and values in the aggregate vector follow declaration
+order. The named form is an alternating sequence of keyword and value pairs.
+Named fields are matched by name, so their order does not matter. Duplicate and
+unknown field names are rejected.
+
+An alternating keyword/value sequence always selects the named form. When a
+struct's positional fields themselves contain keywords, use the aggregate
+vector to make positional intent explicit, for example `(Job [:job/queued
+"thumbnail"])`.
+
+A map is never interpreted as named struct arguments. `(User {:name "Ada"})`
+passes one map value to `User` and is rejected because `User` does not have one
+map field. This keeps map literals independent of call context.
+
+The same rule applies inside typed collections: struct elements use an
+explicit constructor, while brace elements remain maps.
+
+```clojure
+([]User [(User :age 36 :name "Ada")])
+```
+
+Use `(zero User)` for an explicit zero value or `(User [])` for the empty
+positional aggregate. A bare `(User)` call is rejected so zero construction is
+never confused with an ordinary zero-argument procedure call.
+
 Field metadata accepts ordinary type spelling, including compact Odin-like type
 tokens:
 
 ```clojure
-(defstruct Batch {
+(defstruct Batch [
   ids: []int
   tags: set[string]
   weights: [4]f32
-})
+])
 ```
 
 Use `:using` after a field type when you want Odin to promote the embedded
@@ -577,14 +636,14 @@ the containing value still stores a normal named field, but callers can access
 the embedded field's members directly through the outer value.
 
 ```clojure
-(defstruct Logger {
+(defstruct Logger [
   level: int
-})
+])
 
-(defstruct App {
+(defstruct App [
   logger: Logger :using
   config: Config
-})
+])
 
 (defn app-level [app: App] -> int
   app.level) ; promoted from app.logger.level by Odin
@@ -624,12 +683,12 @@ Use `:default` after a field type to replace its zero-value construction
 default:
 
 ```clojure
-(defstruct Settings {
+(defstruct Settings [
   port: i64 :default 8080
   label: string :default "local"
-})
+])
 
-(Settings {})
+(Settings [])
 ```
 
 Defaults are evaluated when an omitted field is constructed. At a decoded
@@ -649,8 +708,8 @@ Enums define a named integer-like set of values:
 ])
 
 (defenum Http-Status {
-  OK: 200
-  Not-Found: 404
+  :OK 200
+  :Not-Found 404
 })
 ```
 
@@ -666,13 +725,13 @@ Use `.Name` to refer to an enum member:
 Unions define tagged values that can contain one of several payload shapes:
 
 ```clojure
-(defunion Value {
+(defunion Value [
   i: int
   s: string
-})
+])
 
-(Value {i: 42})
-(Value {s: "kvist"})
+(Value :i 42)
+(Value :s "kvist")
 ```
 
 Use `case` to inspect the active payload.
@@ -752,7 +811,7 @@ Typed declarations use `name: Type`:
 
 ```clojure
 (def default-port: int 8080)
-(defvar current-state: State (State {}))
+(defvar current-state: State (State []))
 ```
 
 An uninitialized typed `defvar` starts with the type's zero value:
@@ -910,10 +969,10 @@ These forms are also valid directly inside a function body:
 (defn classify-code [code: int] -> int
   (def limit: int 99)
   (defenum Status [OK Large])
-  (defstruct Payload {code: int status: Status})
-  (defunion Value {payload: Payload raw: int})
-  (let [payload (Payload {code: code status: .OK})
-        value (Value {payload: payload})]
+  (defstruct Payload [code: int status: Status])
+  (defunion Value [payload: Payload raw: int])
+  (let [payload (Payload :code code :status .OK)
+        value (Value :payload payload)]
     (case value
       (Payload item) (if (> item.code limit) 1 0)
       (int raw) raw
@@ -932,20 +991,20 @@ Structs, enums, unions, transforms, sources, and macros use the same public /
 package-private split at top level:
 
 ```clojure
-(defstruct Point {
+(defstruct Point [
   x: f32
   y: f32
-})
+])
 
 (defenum Status {
-  Ready: 1
-  Done: 2
+  :Ready 1
+  :Done 2
 })
 
-(defunion Payload {
+(defunion Payload [
   text: string
   code: int
-})
+])
 
 (deftransform- internal-transform
   (comp (map normalize)))
@@ -999,12 +1058,12 @@ Caller intrinsics use Odin spelling:
 (import rt "base:runtime")
 
 (defn location
-  [loc: rt.Source_Code_Location = #caller_location]
+  [loc: rt.Source_Code_Location :default #caller_location]
   -> rt.Source_Code_Location
   loc)
 
 (defn expression
-  [x: bool, text: string = (#caller_expression x)]
+  [x: bool, text: string :default (#caller_expression x)]
   -> string
   text)
 ```
@@ -1161,19 +1220,19 @@ Ordinary calls are list-shaped:
 (fmt.tprintf "user-%d" 42)
 ```
 
-Kvist also supports named arguments for API-shaped functions. Named arguments
-are passed as a single brace literal at the end of the call:
+Kvist also supports named arguments for API-shaped functions. The named part of
+a call is an alternating sequence of keyword and value pairs:
 
 ```clojure
-(defn greet [name: string, punctuation: string = "!"] -> string
+(defn greet [name: string, punctuation: string :default "!"] -> string
   ...)
 
-(defn place [name: string, x: int, y: int, label: string = "ok"] -> string
+(defn place [name: string, x: int, y: int, label: string :default "ok"] -> string
   ...)
 
 (greet "Ada")
-(greet {name: "Linus" punctuation: "?"})
-(place "enemy" {x: 10 y: 20})
+(greet :punctuation "?" :name "Linus")
+(place "enemy" :y 20 :x 10)
 ```
 
 Parameters with defaults must trail required parameters. Defaults can be omitted
@@ -1181,12 +1240,29 @@ positionally from the tail or omitted by name. Mixed calls keep a positional
 prefix and name the remaining tail:
 
 ```clojure
-(place "enemy" {x: 10 y: 20 label: "boss"})
+(place "enemy" :label "boss" :y 20 :x 10)
 ```
 
-Named arguments use `field:` labels, reject duplicates, and reject names that do
-not match the callee's parameters. A named argument cannot overlap a positional
-argument already supplied.
+Named arguments use prefix keyword keys, reject duplicates, and reject names
+that do not match the callee's parameters. A named argument cannot overlap a
+positional argument already supplied. Their order does not matter: the compiler
+matches each keyword to the declared parameter and emits the call in declaration
+order.
+
+A map literal is always one positional value, even when its keys have the same
+names as parameters:
+
+```clojure
+(defn handle [message: Data] -> int ...)
+
+(handle {:message "hello"}) ; one positional Data argument
+```
+
+This is the same rule as for struct construction: braces always make a map;
+alternating `:name value` pairs make named arguments. If a procedure instead
+expects a keyword as an ordinary positional value in a position that could be
+read as a named argument, use `(keyword :name)` to make that value expression
+explicit.
 
 ### Multiple Return Values
 
@@ -1287,24 +1363,29 @@ The general rule is: a type in call position constructs or converts a value of
 that type.
 
 ```clojure
-(Point {x: 1.0 y: 2.0})
+(Point :x 1.0 :y 2.0)
 (rl.Vector2 [10.0 20.0])
 (f32 x)
 ([3]i32 [1 2 3])
 (matrix[2 2]f32 [1 2 3 4])
 (#simd[4]f32 [1 2 3 4])
-(#soa[dynamic]Particle [(Particle {x: 0 y: 0 vx: 1 vy: 1})])
+(#soa[dynamic]Particle [(Particle :x 0 :y 0 :vx 1 :vy 1)])
 (bit_set[Permission; u8] [.Read .Execute])
 (quaternion [0.0 0.0 0.0 1.0])
 ```
 
-Vector literals are positional aggregate input. Brace literals are field-labeled
-aggregate input:
+Struct values can be constructed from direct positional values, alternating
+named fields, or one positional aggregate vector:
 
 ```clojure
+(rl.Vector2 10.0 20.0)
+(rl.Rectangle :height 1 :x 0 :width 1 :y 0)
 (rl.Vector2 [10.0 20.0])
-(rl.Rectangle {x: 0 y: 0 width: 1 height: 1})
 ```
+
+Direct values and vector elements follow declaration order. Alternating named
+fields are matched by name and may appear in any order. A map literal is always
+one value; it is not a struct constructor form.
 
 Inline collection literals are also available for the most common owned
 containers:
@@ -1344,35 +1425,36 @@ Empty inline literals need type context:
 Use `keyword` when the value is a symbolic tag rather than user-facing text:
 
 ```clojure
-(defstruct Job {
+(defstruct Job [
   state: keyword
   label: string
-})
+])
 
-(Job {state: :job/queued label: "thumbnail"})
+(Job :state :job/queued :label "thumbnail")
 ```
 
-Use `(type Head Args...)` when a type must appear as a value. This includes
-explicit `typeid` arguments and instantiated polymorphic types:
+Use `(typeid Head Args...)` to instantiate a polymorphic Odin type or pass a
+type as an explicit `typeid` argument:
 
 ```clojure
-(read-as (type Config) "config.json")
-(linalg.identity (type matrix[2 2]f32))
-(chan.create (type chan.Chan int) 1 context.allocator)
+(read-as (typeid Config) "config.json")
+(linalg.identity (typeid matrix[2 2]f32))
+(chan.create (typeid chan.Chan int) 1 context.allocator)
 ```
 
-For Odin polymorphic struct literals, the type constructor can be used directly
-when the final argument is a vector or brace literal:
+For Odin polymorphic struct literals, put the instantiated type in call position
+and use the same constructor forms:
 
 ```clojure
-(queue.Queue int {})
-(sc.State_Def Door-State {id: .Closed})
+(zero (typeid queue.Queue int))
+((sc.State_Def Door-State) :id .Closed)
 ```
 
 These lower to Odin generic type instantiation, for example
-`queue.Queue(int){}` and `sc.State_Def(Door_State){...}`. Use `(type ...)`
-when you need the type value itself, such as a parameter type, return type, or
-`typeid` argument.
+`queue.Queue(int){}` and `sc.State_Def(Door_State){...}`. Use `(typeid ...)`
+for the instantiated type in a parameter, return type, constructor head, or
+explicit type argument. `(type value)` is a separate runtime operation that
+returns a comparable descriptor for a value's type.
 
 Use `make` for runtime or allocator-backed construction where Odin uses a
 procedure-like allocation operation:
@@ -1428,7 +1510,17 @@ Use `zero` to construct an explicit zero value for a type:
 ```clojure
 (zero [2]f32)
 (zero bit_set[Permission; u8])
+(zero (typeid queue.Queue int))
 ```
+
+Use `zero-of` when the type should come from an expression:
+
+```clojure
+(zero-of err)
+```
+
+This lowers to `type_of(err){}`. It is useful in generic code and macros where
+the concrete type is not written directly.
 
 For many collection-building cases, the shipped helper packages provide more
 specific constructors with optional capacity arguments:
@@ -1448,8 +1540,9 @@ often the clearest choice when you want to build a collection incrementally with
 `let` can infer local binding types from `arr.empty`, `map.empty`, and `map.of`
 calls.
 
-There is no separate object-construction runtime. Struct construction is just
-type-call syntax over a brace literal.
+There is no separate object-construction runtime. Struct construction is type
+call syntax with direct positional values, alternating named fields, or one
+positional aggregate vector.
 
 ## Bindings, Blocks, And Local Flow
 
@@ -2095,11 +2188,11 @@ Use `data.decode` when a dynamic boundary should become a concrete native
 struct:
 
 ```clojure
-(defstruct Settings {
+(defstruct Settings [
   port: i64
   enabled: bool
   metadata: Data
-})
+])
 
 (let [[settings err ok]
       (data.decode Settings message '[:settings])]
@@ -2127,15 +2220,15 @@ arrays when `T` is `Data`, `bool`, an integer scalar, or a
 floating-point scalar, a Kvist enum, or a Kvist struct:
 
 ```clojure
-(defstruct Point {
+(defstruct Point [
   x: i64
   y: i64
-})
+])
 
-(defstruct Batch {
+(defstruct Batch [
   ids: [dynamic]i64
   points: [dynamic]Point
-})
+])
 
 (data.decode Batch {:ids [10 20 30]
                     :points [{:x 1 :y 2}
@@ -2368,7 +2461,7 @@ directly when calling Odin APIs that allocate:
 
 ```clojure
 (os.read_entire_file path context.allocator)
-(chan.create (type chan.Chan int) 1 context.allocator)
+(chan.create (typeid chan.Chan int) 1 context.allocator)
 ```
 
 Use `context.temp_allocator` when you explicitly want temporary scratch
@@ -2445,7 +2538,7 @@ Examples:
   counter^.value)
 
 (defn counter-after-bump [] -> int
-  (let [counter (Counter {value: 41})]
+  (let [counter (Counter :value 41)]
     (bump! (addr counter.value))
     (counter-value (addr counter))))
 ```
@@ -2785,7 +2878,7 @@ as a separate contiguous column:
 (import soa "kvist:soa")
 
 (let [particles (soa.make Particle 1024) :defer]
-  (soa.push! &particles (Particle {x: 1 y: 2 mass: 3}))
+  (soa.push! &particles (Particle :x 1 :y 2 :mass 3))
   (soa.scale! particles .mass 0.5)
   (println particles.mass[0]))
 ```
@@ -2805,10 +2898,10 @@ column operations.
 generated function, and the item type yielded by `:next`.
 
 ```clojure
-(defstruct File_Source {
+(defstruct File_Source [
   items: []string
   index: int
-})
+])
 
 (defn next-file [src: ^File_Source] -> [path: string ok: bool]
   (if (< src.index (count src.items))
@@ -2823,7 +2916,7 @@ generated function, and the item type yielded by `:next`.
 (defiter files [items: []string] -> File_Source :yield string
   :next next-file
   :dispose dispose-files
-  (File_Source {items: items index: 0}))
+  (File_Source :items items :index 0))
 ```
 
 This emits an ordinary opener function:

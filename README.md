@@ -53,10 +53,10 @@ Ordinary Kvist values stay concrete and statically typed. This transform over
 native structs lowers to one direct loop:
 
 ```clojure
-(defstruct User {
+(defstruct User [
   name: string
   active?: bool
-})
+])
 
 (defn active-names [users: []User] -> [dynamic]string
   (into [dynamic]string

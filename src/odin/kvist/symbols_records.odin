@@ -88,7 +88,7 @@ symbols_proc_signature :: proc(name: string, decl: Proc_Decl) -> string {
         }
         fmt.sbprintf(&builder, "%s: %s", param.name, param.ty)
         if param.has_default {
-            strings.write_string(&builder, " = ")
+            strings.write_string(&builder, " :default ")
             strings.write_string(&builder, symbols_form_text(param.default_value))
         }
     }

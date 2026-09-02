@@ -2,9 +2,9 @@
 
 (def Handle (distinct rawptr))
 
-(defstruct Counter {
+(defstruct Counter [
   value: int
-})
+])
 
 (defn bump! [x: ^int]
   ;; For a simple pointer symbol, `x^` is the lightest read.write form.
@@ -15,7 +15,7 @@
   counter^.value)
 
 (defn counter-after-bump [] -> int
-  (let [counter (Counter {value: 41})]
+  (let [counter (Counter :value 41)]
     ;; Take the address of a struct field when you need in-place mutation.
     (bump! (addr counter.value))
     (counter-value (addr counter))))

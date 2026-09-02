@@ -77,7 +77,7 @@ multiple forms with `forms`:
     (forms
       `(defstruct ~name ~fields)
       `(defn ~make-name [] -> ~name
-         (~name {})))))
+         (~name [])))))
 ```
 
 `concat` also returns a sequence of forms by concatenating evaluated form
@@ -232,8 +232,8 @@ Kvist macros are explicit source rewriting, not a hygienic macro system. Use
 Package-qualified symbols and generated symbols are emitted exactly as source
 forms, then go through normal Kvist package and name lowering.
 
-When generating typed declarations, the `:` belongs to the generated name
-symbol:
+When generating the canonical typed-declaration shorthand, the `:` belongs to
+the generated name symbol:
 
 ```clojure
 (let [typed-name (symbol (str (name const-name) ":"))]
@@ -245,6 +245,10 @@ This expands to a normal typed declaration such as:
 ```clojure
 (def Label: string "value")
 ```
+
+The equivalent full form is `(def Label : string "value")`. Both compile, but
+generated source should follow the same attached shorthand as handwritten
+Kvist unless a macro specifically needs the separator as its own form.
 
 ## Inspecting Expansions
 

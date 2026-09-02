@@ -4,7 +4,7 @@
 (import time "core:time")
 
 (defstruct Run-Stats
-  {mode: int
+  [mode: int
    run: int
    steps: int
    elapsed-s: f64
@@ -18,7 +18,7 @@
    return-s: f32
    charging-s: f32
    dock-events: int
-   docked: bool})
+   docked: bool])
 
 (defn parse-mode
   "Parse a CLI mode name into the corresponding controller mode."
@@ -94,21 +94,21 @@
         (set! was-charging state.charging)
         (mut! i += 1))
       (let [elapsed (time.duration_seconds (time.tick_since start))
-            stats (Run-Stats {mode: mode
-                              run: run
-                              steps: steps
-                              elapsed-s: elapsed
-                              sim-seconds: (f32 seconds)
-                              coverage: (coverage-percent (addr state.world))
-                              known: (belief-known-percent (addr state.belief))
-                              battery: state.battery
-                              collisions: state.robot.collisions
-                              distance: state.robot.distance
-                              cutting-s: (* (f32 cutting-steps) Fixed-DT)
-                              return-s: (* (f32 return-steps) Fixed-DT)
-                              charging-s: (* (f32 charging-steps) Fixed-DT)
-                              dock-events: dock-events
-                              docked: (docked? (addr state))})]
+            stats (Run-Stats :mode mode
+                              :run run
+                              :steps steps
+                              :elapsed-s elapsed
+                              :sim-seconds (f32 seconds)
+                              :coverage (coverage-percent (addr state.world))
+                              :known (belief-known-percent (addr state.belief))
+                              :battery state.battery
+                              :collisions state.robot.collisions
+                              :distance state.robot.distance
+                              :cutting-s (* (f32 cutting-steps) Fixed-DT)
+                              :return-s (* (f32 return-steps) Fixed-DT)
+                              :charging-s (* (f32 charging-steps) Fixed-DT)
+                              :dock-events dock-events
+                              :docked (docked? (addr state)))]
         (delete-app-state! (addr state))
         stats))))
 
@@ -166,21 +166,21 @@
           (mut! total-docked += 1)))
       (mut! run += 1))
     (let [n (f64 runs)
-          avg (Run-Stats {mode: mode
-                          run: 0
-                          steps: (* seconds Target-FPS)
-                          elapsed-s: (/ total-elapsed n)
-                          sim-seconds: (f32 seconds)
-                          coverage: (/ total-coverage n)
-                          known: (/ total-known n)
-                          battery: (f32 (/ total-battery n))
-                          collisions: (int (/ total-collisions n))
-                          distance: (f32 (/ total-distance n))
-                          cutting-s: (f32 (/ total-cutting n))
-                          return-s: (f32 (/ total-return n))
-                          charging-s: (f32 (/ total-charging n))
-                          dock-events: (/ total-dock-events runs)
-                          docked: (= total-docked runs)})]
+          avg (Run-Stats :mode mode
+                          :run 0
+                          :steps (* seconds Target-FPS)
+                          :elapsed-s (/ total-elapsed n)
+                          :sim-seconds (f32 seconds)
+                          :coverage (/ total-coverage n)
+                          :known (/ total-known n)
+                          :battery (f32 (/ total-battery n))
+                          :collisions (int (/ total-collisions n))
+                          :distance (f32 (/ total-distance n))
+                          :cutting-s (f32 (/ total-cutting n))
+                          :return-s (f32 (/ total-return n))
+                          :charging-s (f32 (/ total-charging n))
+                          :dock-events (/ total-dock-events runs)
+                          :docked (= total-docked runs))]
       (print-stats-row "avg" avg))))
 
 (defn run-all-experiments

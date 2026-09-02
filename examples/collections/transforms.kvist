@@ -3,17 +3,17 @@
 (import arr "kvist:arr")
 (import map "kvist:map")
 
-(defstruct Order {
+(defstruct Order [
   status: int
   amount: int
   discount: int
-})
+])
 
-(defstruct User {
+(defstruct User [
   name: string
   age: int
   active?: bool
-})
+])
 
 (defn paid? [order: Order] -> bool
   (= order.status 2))
@@ -87,14 +87,14 @@
   (mapcat order-parts))
 
 (defn sample-orders [] -> [3]Order
-  ([3]Order [(Order {status: 2 amount: 100 discount: 10})
-             (Order {status: 1 amount: 50 discount: 0})
-             (Order {status: 2 amount: 40 discount: 5})]))
+  ([3]Order [(Order :status 2 :amount 100 :discount 10)
+             (Order :status 1 :amount 50 :discount 0)
+             (Order :status 2 :amount 40 :discount 5)]))
 
 (defn sample-users [] -> [3]User
-  ([3]User [(User {name: "Ada" age: 36 active?: true})
-            (User {name: "Lin" age: 41 active?: false})
-            (User {name: "Grace" age: 28 active?: true})]))
+  ([3]User [(User :name "Ada" :age 36 :active? true)
+            (User :name "Lin" :age 41 :active? false)
+            (User :name "Grace" :age 28 :active? true)]))
 
 (defn collect-paid-totals [] -> [dynamic]int
   (into [dynamic]int paid-order-totals (sample-orders)))
@@ -122,8 +122,8 @@
 (defn max-paid-total [] -> int
   (transduce paid-order-totals max 0 (sample-orders)))
 
-(defn collect-order-statuses [] -> (map int (struct {}))
-  (into (map int (struct {})) (map .status) (sample-orders)))
+(defn collect-order-statuses [] -> (map int (struct []))
+  (into (map int (struct [])) (map .status) (sample-orders)))
 
 (defn collect-all-ages-inline [] -> [dynamic]int
   (into [dynamic]int (map .age) (sample-users)))
@@ -225,7 +225,7 @@
                  (comp
                    (filter (fn [entry: (map.entry string int)] -> bool (> entry.value 0)))
                    (map (fn [entry: (map.entry string int)] -> (map.entry string int)
-                          ((map.entry string int) {key: entry.key value: (+ entry.value 1)}))))
+                          ((map.entry string int) :key entry.key :value (+ entry.value 1)))))
                  (map.entries lookup)) :defer]
     (+ (map.get bumped "aa" 0)
        (map.get bumped "b" 0)

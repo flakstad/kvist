@@ -30,24 +30,24 @@
     (let [entry (first entries)
           struct-name (nth entry 0)
           ctor-name (symbol (str "make-" (name union-name) "-" (name struct-name)))
-          tag (symbol (str (name struct-name) ":"))]
+          tag (keyword (name struct-name))]
       (forms
         `(defn ~ctor-name [value: ~struct-name] -> ~union-name
-           (~union-name {~tag value}))
+           (~union-name ~tag value))
         (emit-message-ctors union-name (rest entries))))))
 
 (defmacro defmessages [union-name entries]
   (forms
     (emit-message-structs entries)
-    `(defunion ~union-name {
+    `(defunion ~union-name [
        ~@(emit-message-union-entries entries)
-     })
+     ])
     (emit-message-ctors union-name entries)))
 
 (defmessages Event [
-  [Connected {id: int}]
-  [Disconnected {id: int reason: string}]
-  [Data {id: int payload: string}]
+  [Connected [id: int]]
+  [Disconnected [id: int reason: string]]
+  [Data [id: int payload: string]]
 ])
 
 (defn describe-event [event: Event] -> string
@@ -58,9 +58,9 @@
     "unknown"))
 
 (defn macro-messages-demo []
-  (let [connected (make-Event-Connected (Connected {id: 7}))
-        disconnected (make-Event-Disconnected (Disconnected {id: 7 reason: "timeout"}))
-        data (make-Event-Data (Data {id: 7 payload: "hello"}))]
+  (let [connected (make-Event-Connected (Connected :id 7))
+        disconnected (make-Event-Disconnected (Disconnected :id 7 :reason "timeout"))
+        data (make-Event-Data (Data :id 7 :payload "hello"))]
     (println (describe-event connected))
     (println (describe-event disconnected))
     (println (describe-event data))))

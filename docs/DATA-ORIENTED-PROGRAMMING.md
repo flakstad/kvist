@@ -261,7 +261,8 @@ Nested operations use list or vector Data paths:
 (data.dissoc-in message [:request :credentials])
 ```
 
-The expected `Data` parameter makes ordinary vector syntax contextual Data.
+These functions declare the path parameter as `Data`, so the ordinary vector
+literal constructs a `Data` vector.
 `get-in` accepts an empty path and borrows the input. `assoc-in` and
 `update-in` require a non-empty path. Missing or nil intermediate map values
 become maps. `dissoc-in` preserves empty parents.
@@ -361,7 +362,8 @@ Odin-level structural debug print and can expose Data backing details.
 
 ## Construction
 
-Contextual literals are the normal constructor:
+A function that returns `Data` can construct it directly with an ordinary
+collection literal:
 
 ```clojure
 (defn response [id: string, values: Data] -> Data

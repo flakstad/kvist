@@ -112,7 +112,7 @@
   returned error. The zero `Decode-Error` and true boolean indicate success."
   [value: Data, path: Data] -> [decoded: i64, err: Decode-Error, ok: bool]
   (if (int? value)
-    (return (int value) {} true)
+    (return (int value) (Decode-Error []) true)
     (return 0 (decode-error path .Int (kind value)) false)))
 
 (defn decode-int
@@ -124,7 +124,7 @@
   "Decode floating-point Data to `f64`, preserving `path` on failure."
   [value: Data, path: Data] -> [decoded: f64, err: Decode-Error, ok: bool]
   (if (float? value)
-    (return (float value) {} true)
+    (return (float value) (Decode-Error []) true)
     (return 0 (decode-error path .Float (kind value)) false)))
 
 (defn decode-float
@@ -136,7 +136,7 @@
   "Decode boolean Data to `bool`, preserving `path` on failure."
   [value: Data, path: Data] -> [decoded: bool, err: Decode-Error, ok: bool]
   (if (bool? value)
-    (return (bool value) {} true)
+    (return (bool value) (Decode-Error []) true)
     (return false (decode-error path .Bool (kind value)) false)))
 
 (defn decode-bool

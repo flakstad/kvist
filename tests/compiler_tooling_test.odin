@@ -15,20 +15,20 @@ symbols_source_indexes_top_level_forms :: proc(t: ^testing.T) {
 
 ;; A user record.
 ;; Owned by caller.
-(defstruct User {
+(defstruct User [
   name: string
   active: bool
-})
+])
 
 (defenum Status [
   Active
   Archived
 ])
 
-(defunion Value {
+(defunion Value [
   i: int
   s: string
-})
+])
 
 (def max-age: int 120)
 
@@ -51,7 +51,7 @@ symbols_source_indexes_top_level_forms :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\n"), true)
     testing.expect_value(t, strings.contains(output, "import\tstrings\t2\t28\tcore:strings\t\t\n"), true)
-    testing.expect_value(t, strings.contains(output, "struct\tUser\t6\t12\t\t(User {name: string active: bool})\tA user record.\\nOwned by caller.\n"), true)
+    testing.expect_value(t, strings.contains(output, "struct\tUser\t6\t12\t\t(User [name: string active: bool])\tA user record.\\nOwned by caller.\n"), true)
     testing.expect_value(t, strings.contains(output, "field\tUser.name\t7\t3\tUser\t\t\n"), true)
     testing.expect_value(t, strings.contains(output, "enum\tStatus\t11\t10\t\t\t\n"), true)
     testing.expect_value(t, strings.contains(output, "variant\tStatus.Active\t12\t3\tStatus\t\t\n"), true)
@@ -68,8 +68,8 @@ symbols_source_indexes_defstruct_docstring :: proc(t: ^testing.T) {
 
 (defstruct Person
   "Primary profile."
-  {name: string
-   age: int})`
+  [name: string
+   age: int])`
 
     output, err, ok := kvist.symbols_source(source)
     testing.expect_value(t, ok, true)
@@ -79,7 +79,7 @@ symbols_source_indexes_defstruct_docstring :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "struct\tPerson\t3\t12\t\t(Person {name: string age: int})\tPrimary profile.\n"), true)
+    testing.expect_value(t, strings.contains(output, "struct\tPerson\t3\t12\t\t(Person [name: string age: int])\tPrimary profile.\n"), true)
     testing.expect_value(t, strings.contains(output, "field\tPerson.name\t5\t4\tPerson\t\t\n"), true)
 }
 
@@ -87,11 +87,11 @@ symbols_source_indexes_defstruct_docstring :: proc(t: ^testing.T) {
 symbols_source_preserves_struct_field_defaults :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Person {
+(defstruct Person [
   name: string :default "anonymous"
   active?: bool :default false
   scores: [dynamic]i64 :default []
-})`
+])`
 
     output, err, ok := kvist.symbols_source(source)
     testing.expect_value(t, ok, true)
@@ -105,7 +105,7 @@ symbols_source_preserves_struct_field_defaults :: proc(t: ^testing.T) {
         t,
         strings.contains(
             output,
-            `(Person {name: string :default "anonymous" active?: bool :default false scores: [dynamic]i64 :default []})`,
+            `(Person [name: string :default "anonymous" active?: bool :default false scores: [dynamic]i64 :default []])`,
         ),
         true,
     )
@@ -117,8 +117,8 @@ symbols_source_indexes_reload_state_as_ordinary_struct_and_alias :: proc(t: ^tes
     source := `(package main)
 
 (defstruct App_State
-  {steps: int
-   message: string})
+  [steps: int
+   message: string])
 
 (def Reload_State App_State)`
 
@@ -130,7 +130,7 @@ symbols_source_indexes_reload_state_as_ordinary_struct_and_alias :: proc(t: ^tes
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "struct\tApp_State\t3\t12\t\t(App_State {steps: int message: string})\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "struct\tApp_State\t3\t12\t\t(App_State [steps: int message: string])\t\n"), true)
     testing.expect_value(t, strings.contains(output, "field\tApp_State.steps\t4\t4\tApp_State\t\t\n"), true)
     testing.expect_value(t, strings.contains(output, "field\tApp_State.message\t5\t4\tApp_State\t\t\n"), true)
     testing.expect_value(t, strings.contains(output, "const\tReload_State"), true)
@@ -145,10 +145,10 @@ symbols_source_indexes_defunion_and_defenum :: proc(t: ^testing.T) {
   Archived
 ])
 
-(defunion Value {
+(defunion Value [
   i: int
   s: string
-})`
+])`
 
     output, err, ok := kvist.symbols_source(source)
     testing.expect_value(t, ok, true)
@@ -168,7 +168,7 @@ symbols_source_indexes_defunion_and_defenum :: proc(t: ^testing.T) {
 symbols_source_includes_proc_default_values_in_signatures :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defn greet [name: string, punctuation: string = "!", count: int = (+ 1 2)] -> string
+(defn greet [name: string, punctuation: string :default "!", count: int :default (+ 1 2)] -> string
   name)`
 
     output, err, ok := kvist.symbols_source(source)
@@ -179,7 +179,7 @@ symbols_source_includes_proc_default_values_in_signatures :: proc(t: ^testing.T)
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "proc\tgreet\t3\t7\tlifetime=result-borrowed\t(greet [name: string, punctuation: string = \"!\", count: int = (+ 1 2)] -> string)\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "proc\tgreet\t3\t7\tlifetime=result-borrowed\t(greet [name: string, punctuation: string :default \"!\", count: int :default (+ 1 2)] -> string)\t\n"), true)
 }
 
 @(test)
@@ -188,10 +188,10 @@ symbols_source_includes_dot_access_param_signatures :: proc(t: ^testing.T) {
 
 (import fmt "core:fmt")
 
-(defstruct Point {
+(defstruct Point [
   x: int
   y: int
-})
+])
 
 (defn draw [point: Point] -> int
   (+ point.x point.y))`
@@ -305,10 +305,10 @@ editor_symbols_source_merges_context_surfaces :: proc(t: ^testing.T) {
     source := `(package main)
 (import fmt "core:fmt")
 
-(defstruct Greeting {message: string})
+(defstruct Greeting [message: string])
 
 (defn main []
-  (let [g (Greeting {message: "hi"})]
+  (let [g (Greeting :message "hi")]
     (println g.message)))`
 
     output, err, ok := kvist.editor_symbols_source("/tmp/editor-symbols-test.kvist", source)
@@ -331,14 +331,14 @@ editor_symbols_source_merges_context_surfaces :: proc(t: ^testing.T) {
 editor_symbols_source_indexes_local_defvar_struct_fields :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Animation {
+(defstruct Animation [
   texture: int
   num-frames: int
   name: string
-})
+])
 
 (defn main []
-  (defvar player-idle (Animation {texture: 1 num-frames: 3 name: "idle"}))
+  (defvar player-idle (Animation :texture 1 :num-frames 3 :name "idle"))
   (defvar current-anim player-idle))`
 
     output, err, ok := kvist.editor_symbols_source("/tmp/editor-local-fields-test.kvist", source)
@@ -420,7 +420,7 @@ editor_symbols_source_includes_language_forms_and_helpers :: proc(t: ^testing.T)
 editor_symbols_source_includes_proc_default_values_in_signatures :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defn greet [name: string, punctuation: string = "!", count: int = (+ 1 2)] -> string
+(defn greet [name: string, punctuation: string :default "!", count: int :default (+ 1 2)] -> string
   name)`
 
     output, err, ok := kvist.editor_symbols_source("/tmp/editor-default-signature-test.kvist", source)
@@ -431,17 +431,17 @@ editor_symbols_source_includes_proc_default_values_in_signatures :: proc(t: ^tes
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "proc\tgreet\t3\t7\tlifetime=result-borrowed\t(greet [name: string, punctuation: string = \"!\", count: int = (+ 1 2)] -> string)\t\t/tmp/editor-default-signature-test.kvist\n"), true)
+    testing.expect_value(t, strings.contains(output, "proc\tgreet\t3\t7\tlifetime=result-borrowed\t(greet [name: string, punctuation: string :default \"!\", count: int :default (+ 1 2)] -> string)\t\t/tmp/editor-default-signature-test.kvist\n"), true)
 }
 
 @(test)
 editor_symbols_source_includes_dot_access_param_signatures :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Point {
+(defstruct Point [
   x: int
   y: int
-})
+])
 
 (defn draw [point: Point] -> int
   (+ point.x point.y))`
@@ -596,8 +596,8 @@ editor_symbols_source_includes_soa_package_helpers :: proc(t: ^testing.T) {
 (import soa "kvist:soa")
 
 (defstruct Profile
-  {name: string
-   active?: bool})
+  [name: string
+   active?: bool])
 
 (defn main []
   (let [profiles (soa.make Profile 4)]
@@ -830,7 +830,7 @@ editor_symbols_source_includes_multi_file_root_package_symbols_from_non_anchor_f
     main_source := `(package demo)
 
 (defstruct App_State
-  {count: int})
+  [count: int])
 
 (defn main [] -> int
   (helper-value 5))`
@@ -1267,7 +1267,7 @@ cli_reload_command_discovers_sibling_reload_adapter :: proc(t: ^testing.T) {
     main_source := `(package demo_app)
 
 (defstruct App_State
-  {ticks: int})
+  [ticks: int])
 
 (defn init [state: ^App_State]
   (set! state^.ticks 0))
@@ -1276,7 +1276,7 @@ cli_reload_command_discovers_sibling_reload_adapter :: proc(t: ^testing.T) {
   (mut! state^.ticks += 1))
 
 (defn main []
-  (let [state (App_State {})]
+  (let [state (App_State [])]
     (init &state)
     (tick &state)))`
     main_write_err := os.write_entire_file_from_string(main_path, main_source)
@@ -1408,7 +1408,7 @@ cli_reload_command_resolves_runtime_from_configured_root :: proc(t: ^testing.T) 
     defer delete(reload_pkg_path)
     reload_pkg_source := `(package reload)
 
-(defstruct Run_Host {})
+(defstruct Run_Host [])
 
 (defn checkpoint! [host: ^Run_Host] -> bool
   false)`
@@ -1439,7 +1439,7 @@ cli_reload_command_resolves_runtime_from_configured_root :: proc(t: ^testing.T) 
     app_source := `(package demo_app)
 
 (defstruct App_State
-  {ticks: int})
+  [ticks: int])
 
 (defn tick [state: ^App_State]
   (mut! state^.ticks += 1))`

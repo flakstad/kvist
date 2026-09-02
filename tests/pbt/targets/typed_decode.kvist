@@ -6,12 +6,12 @@
 
 (defenum Mode [Manual Automatic Read-Only])
 
-(defstruct Child {
+(defstruct Child [
   host-id: i64
   active: bool
-})
+])
 
-(defstruct Config {
+(defstruct Config [
   port: i64
   enabled: bool
   ratio: f64
@@ -24,7 +24,7 @@
   modes: [dynamic]Mode
   children: [dynamic]Child
   raw: Data
-})
+])
 
 (defn bool-int [value: bool] -> int
   (if value 1 0))

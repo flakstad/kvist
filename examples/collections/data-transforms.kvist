@@ -1,11 +1,11 @@
 ;; Fused data transforms: one item flow, several outputs.
 (package main)
 
-(defstruct Order {
+(defstruct Order [
   status: int
   amount: int
   discount: int
-})
+])
 
 (defn paid? [order: Order] -> bool
   (= order.status 2))
@@ -22,10 +22,10 @@
   (filter positive?))
 
 (defn sample-orders [] -> [4]Order
-  ([4]Order [(Order {status: 2 amount: 100 discount: 10})
-             (Order {status: 1 amount: 40 discount: 0})
-             (Order {status: 2 amount: 80 discount: 5})
-             (Order {status: 2 amount: 30 discount: 30})]))
+  ([4]Order [(Order :status 2 :amount 100 :discount 10)
+             (Order :status 1 :amount 40 :discount 0)
+             (Order :status 2 :amount 80 :discount 5)
+             (Order :status 2 :amount 30 :discount 30)]))
 
 (defn collect-paid-nets [] -> [dynamic]int
   (into [dynamic]int paid-nets (sample-orders)))
@@ -46,8 +46,8 @@
     0
     (sample-orders)))
 
-(defn paid-statuses [] -> (map int (struct {}))
-  (into (map int (struct {}))
+(defn paid-statuses [] -> (map int (struct []))
+  (into (map int (struct []))
     (comp
       (filter paid?)
       (map .status))

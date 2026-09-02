@@ -1228,22 +1228,22 @@ compile_source_package_rewrites_compact_types_and_keeps_enum_variants :: proc(t:
 
 (defenum Term-Kind [Value Var])
 
-(defstruct Value {
+(defstruct Value [
   text: string
-})
+])
 
-(defstruct Item {
+(defstruct Item [
   value: Value
-})
+])
 
-(defstruct Box {
+(defstruct Box [
   items: [dynamic]Item
   kind: Term-Kind
-})
+])
 
 (defn make-box [] -> Box
-  (Box {items: (make [dynamic]Item)
-        kind: .Value}))
+  (Box :items (make [dynamic]Item)
+        :kind .Value))
 
 (defn count-items [box: Box, items: []Item] -> int
   (+ (count box.items) (count items)))`

@@ -12,15 +12,15 @@ import kvist "../src/odin/kvist"
 managed_struct_results_move_through_ordinary_control_flow :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Box {
+(defstruct Box [
   value: Data
-})
+])
 
 (defn make-box [value: Data] -> Box
   (let [present true]
     (if present
-      (Box {value: value})
-      (Box {value: nil}))))
+      (Box :value value)
+      (Box :value nil))))
 
 (defn use [value: Data]
   (let [box (make-box value)]
@@ -44,9 +44,9 @@ managed_struct_results_move_through_ordinary_control_flow :: proc(t: ^testing.T)
 compile_rejects_copy_update_of_managed_struct_field :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Box {
+(defstruct Box [
   value: Data
-})
+])
 
 (defn update-value [box: Box, f: (fn [value: Data] -> Data)] -> Box
   (copy-update box .value f))`
@@ -67,15 +67,15 @@ compile_manages_owned_string_fields_in_native_structs :: proc(t: ^testing.T) {
     source := `(package main)
 (import data "kvist:data")
 
-(defstruct Person {
+(defstruct Person [
   name: string
-})
+])
 
 (defn decode-person [value: Data] -> [person: Person, err: data.Decode-Error, ok: bool]
   (data.decode Person value))
 
 (defn make-person [name: string] -> Person
-  (Person {name: name}))
+  (Person :name name))
 
 (defn rename [person: Person, name: string] -> Person
   (assoc person .name name))
@@ -120,15 +120,15 @@ compile_manages_owned_dynamic_array_fields_in_native_structs :: proc(t: ^testing
     source := `(package main)
 (import data "kvist:data")
 
-(defstruct Batch {
+(defstruct Batch [
   values: [dynamic]i64
-})
+])
 
 (defn decode-batch [value: Data] -> [batch: Batch, err: data.Decode-Error, ok: bool]
   (data.decode Batch value))
 
 (defn wrap [values: [dynamic]i64] -> Batch
-  (Batch {values: values}))`
+  (Batch :values values))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -595,18 +595,18 @@ warn_discarded_third_party_type_case_assignment_owned_string :: proc(t: ^testing
     pkg_source := `(package support)
 (import strings "core:strings")
 
-(defstruct Upper {
+(defstruct Upper [
   value: string
-})
+])
 
-(defstruct Lower {
+(defstruct Lower [
   value: string
-})
+])
 
-(defunion Mode {
+(defunion Mode [
   upper: Upper
   lower: Lower
-})
+])
 
 (defn normalize-mode [mode: Mode s: string] -> string #force_inline
   (let [out ""]

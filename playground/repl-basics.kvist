@@ -141,10 +141,10 @@
   ;;
   ;; Evaluate each declaration with C-c C-c. They are submitted to the running
   ;; package without evaluating the surrounding comment block.
-  (defstruct Lesson-User {
+  (defstruct Lesson-User [
     name: string
     email: string
-  })
+  ])
 
   (defn lesson-user [] -> Lesson-User
     (Lesson-User ["Ada" "ada@example.test"]))
@@ -429,10 +429,10 @@
   ;; them.
 
   (defstruct Live-Counter
-    {total: int})
+    [total: int])
 
   (defvar live-counter: Live-Counter
-    (Live-Counter {total: 3}))
+    (Live-Counter :total 3))
 
   (defn old-total [] -> int
     live-counter.total)
@@ -454,12 +454,12 @@
   ;;    and the initializer constructs a fresh value of the new layout.
 
   (defstruct Live-Counter
-    {total: int
-     label: string})
+    [total: int
+     label: string])
 
   (defvar live-counter: Live-Counter
-    (Live-Counter {total: (old-total)
-                   label: "migrated"}))
+    (Live-Counter :total (old-total)
+                   :label "migrated"))
 
   (defn current-increment! [] -> int
     (do
@@ -556,11 +556,11 @@
   ;; complete old recipe when any of those ABI-bearing pieces evolve.
 
   (defstruct Lesson-Iterator-Source
-    {values: [3]int
-     index: int})
+    [values: [3]int
+     index: int])
 
   (defn open-lesson-items [values: [3]int] -> Lesson-Iterator-Source
-    (Lesson-Iterator-Source {values: values index: 0}))
+    (Lesson-Iterator-Source :values values :index 0))
 
   (defn next-lesson-item
     [source: ^Lesson-Iterator-Source] -> [value: int ok: bool]
@@ -590,14 +590,14 @@
   ;;    identity still changes because its typed dependencies changed.
 
   (defstruct Lesson-Iterator-Source
-    {values: [3]int
+    [values: [3]int
      index: int
-     factor: int})
+     factor: int])
 
   (defn open-lesson-items [values: [3]int] -> Lesson-Iterator-Source
-    (Lesson-Iterator-Source {values: values
-                             index: 0
-                             factor: 2}))
+    (Lesson-Iterator-Source :values values
+                             :index 0
+                             :factor 2))
 
   (defn next-lesson-item
     [source: ^Lesson-Iterator-Source] -> [value: int ok: bool]

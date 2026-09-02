@@ -2,17 +2,17 @@
 (package main)
 
 ;; This is a greeting
-(defstruct Greeting {
+(defstruct Greeting [
   message: string
-})
+])
 
 (defn main []
-  (let [g (Greeting { message: "hello from kvist" })]
+  (let [g (Greeting  :message "hello from kvist" )]
     (println g.message)))
 
 (comment
 
-  (-> (Greeting { message: "hello!" })
+  (-> (Greeting  :message "hello!" )
       .message
       count)
   ;; => 6

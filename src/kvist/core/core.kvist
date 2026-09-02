@@ -286,7 +286,7 @@
           err-name (tuple-binding-name binding "error binding macros expect [value err] bindings")]
       `(let [~binding
              ~expr]
-         (if (= ~err-name {})
+         (if (= ~err-name (zero-of ~err-name))
            ~(when-ok-chain (rest (rest bindings)) body))))))
 
 (defmacro- if-ok-chain
@@ -297,7 +297,7 @@
         rest-bindings (rest (rest bindings))]
     `(let [~binding
            ~expr]
-       (if (= ~err-name {})
+       (if (= ~err-name (zero-of ~err-name))
          ~(cond
             (= (count rest-bindings) 0) then-expr
             :else (if-ok-chain rest-bindings then-expr else-expr))
@@ -356,7 +356,7 @@
 
   The binding vector contains one or more `[value-name err-name] expr` pairs.
   Evaluation stops at the first non-zero error; `body` runs only when every
-  error equals Odin's zero error value `{}`."
+  error equals the zero value for its error type."
   [bindings & body]
   (when-ok-chain
     (ensure-let-bindings bindings "when-ok expects [value err] expr binding pairs")
@@ -366,8 +366,8 @@
   "Bind value/error results, then choose between success and error branches.
 
   The binding vector contains one or more `[value-name err-name] expr` pairs.
-  The success branch is selected only when every error equals Odin's zero error
-  value `{}`; otherwise the failure branch is selected."
+  The success branch is selected only when every error equals the zero value
+  for its error type; otherwise the failure branch is selected."
   [bindings & body]
   (cond
     (= (count body) 2)

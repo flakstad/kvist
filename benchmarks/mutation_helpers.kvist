@@ -12,8 +12,8 @@ ARRAY_N :: 8_000
 MAP_N :: 8_000")
 
 (defstruct Score
-  {value: int
-   bonus: int})
+  [value: int
+   bonus: int])
 
 (defn inc [x: int] -> int
   (+ x 1))
@@ -47,7 +47,7 @@ MAP_N :: 8_000")
         i 0
         checksum 0]
     (while (< j n)
-      (arr.push! base (Score {value: (+ j 1) bonus: (% j 7)}))
+      (arr.push! base (Score :value (+ j 1) :bonus (% j 7)))
       (set! j (+ j 1)))
     (defer (delete base))
     (while (< i reps)
@@ -69,7 +69,7 @@ MAP_N :: 8_000")
         i 0
         checksum 0]
     (while (< j n)
-      (arr.push! base (Score {value: (+ j 1) bonus: (% j 7)}))
+      (arr.push! base (Score :value (+ j 1) :bonus (% j 7)))
       (set! j (+ j 1)))
     (defer (delete base))
     (while (< i reps)

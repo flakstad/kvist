@@ -45,16 +45,16 @@
 (def Hud-Font-Spacing: f32 1.0)
 
 (defstruct Particle
-  {x: f32
+  [x: f32
    y: f32
    vx: f32
    vy: f32
    radius: f32
    mass: f32
-   color: int})
+   color: int])
 
 (defstruct App-State
-  {particles: #soa[dynamic]Particle
+  [particles: #soa[dynamic]Particle
    particle-count: int
    render-limit: int
    target-fps: int
@@ -64,7 +64,7 @@
    metric-start: f64
    fps: f64
    update-ms: f64
-   draw-ms: f64})
+   draw-ms: f64])
 
 (defn lcg-next
   "Advance the deterministic random seed and return the next raw integer."
@@ -109,13 +109,13 @@
             x (+ 20.0 (* (- (f32 w) 40.0) (rand-unit (addr seed))))
             y (+ 20.0 (* (- (f32 h) 40.0) (rand-unit (addr seed))))]
         (soa.push! (addr particles)
-                      (Particle {x: x
-                                 y: y
-                                 vx: (* speed (math.cos angle))
-                                 vy: (* speed (math.sin angle))
-                                 radius: radius
-                                 mass: (* radius radius)
-                                 color: (particle-color-index speed)})))
+                      (Particle :x x
+                                 :y y
+                                 :vx (* speed (math.cos angle))
+                                 :vy (* speed (math.sin angle))
+                                 :radius radius
+                                 :mass (* radius radius)
+                                 :color (particle-color-index speed))))
       (mut! i += 1))
     particles))
 
@@ -274,17 +274,17 @@
   (defer (rl.CloseWindow))
   (rl.SetTargetFPS (i32 Initial-Target-FPS))
   (let [font (rl.LoadFontEx (cstring Hud-Font-Path) Hud-Font-Atlas-Size nil 0)
-        state (App-State {particles: (make-particles Initial-Particle-Count Width Height)
-                          particle-count: Initial-Particle-Count
-                          render-limit: Initial-Render-Limit
-                          target-fps: Initial-Target-FPS
-                          paused: false
-                          antialias: false
-                          frames: 0
-                          metric-start: (rl.GetTime)
-                          fps: 0
-                          update-ms: 0
-                          draw-ms: 0})]
+        state (App-State :particles (make-particles Initial-Particle-Count Width Height)
+                          :particle-count Initial-Particle-Count
+                          :render-limit Initial-Render-Limit
+                          :target-fps Initial-Target-FPS
+                          :paused false
+                          :antialias false
+                          :frames 0
+                          :metric-start (rl.GetTime)
+                          :fps 0
+                          :update-ms 0
+                          :draw-ms 0)]
     (rl.SetTextureFilter font.texture .BILINEAR)
     (defer (rl.UnloadFont font))
     (defer (delete state.particles))

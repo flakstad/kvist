@@ -1,11 +1,11 @@
 (package main)
 (import data "kvist:data")
 
-(defstruct Endpoint {
+(defstruct Endpoint [
   host-id: i64
   display-name: string :default "unnamed"
   tags: Data :default '[]
-})
+])
 
 (defn main []
   (let [[ids err ok]

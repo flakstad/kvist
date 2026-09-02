@@ -1115,11 +1115,12 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
             })
             i = next_i
         case .Symbol:
-            if len(target.text) > 0 && target.text[len(target.text)-1] == ':' {
-                if i+2 >= len(form.items) {
+            _, typed_source_name, type_start, has_annotation := typed_name_parts(form.items[:], i)
+            if has_annotation {
+                if type_start >= len(form.items) {
                     return bindings, Compile_Error{message = "typed binding missing type or value", span = target.span}, false
                 }
-                type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
+                type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], type_start)
                 if !ok_type {
                     return bindings, err_type, false
                 }
@@ -1143,7 +1144,7 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                 } else if let_binding_has_errdefer_marker(form.items[:], marker_i) {
                     return bindings, Compile_Error{message = ":errdefer is only supported on [value err] :or-return bindings", span = form.items[marker_i].span}, false
                 }
-                name := discard_mapped_name(target.text[:len(target.text)-1])
+                name := discard_mapped_name(typed_source_name)
                 append(&bindings, Binding{
                     name               = name,
                     is_typed           = true,

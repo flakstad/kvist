@@ -9,12 +9,12 @@
   Archived
 ])
 
-(defstruct User {
+(defstruct User [
   name: string
   age: int
   status: Status
   verified: bool
-})
+])
 
 (defn active? [user: User] -> bool
   (= user.status .Active))
@@ -32,29 +32,29 @@
   (+ total user.age))
 
 (defn active-count [] -> int
-  (let [users ([]User [(User {name: "Ada" age: 36 status: .Active verified: true})
-                           (User {name: "Lin" age: 17 status: .Paused verified: false})
-                           (User {name: "Grace" age: 45 status: .Active verified: true})
-                           (User {name: "Edsger" age: 72 status: .Archived verified: false})])
+  (let [users ([]User [(User :name "Ada" :age 36 :status .Active :verified true)
+                           (User :name "Lin" :age 17 :status .Paused :verified false)
+                           (User :name "Grace" :age 45 :status .Active :verified true)
+                           (User :name "Edsger" :age 72 :status .Archived :verified false)])
         active-users (arr.filter active? users)]
     (defer (delete active-users))
     (count active-users)))
 
 (defn active-age-total [] -> int
-  (let [users ([]User [(User {name: "Ada" age: 36 status: .Active verified: true})
-                           (User {name: "Lin" age: 17 status: .Paused verified: false})
-                           (User {name: "Grace" age: 45 status: .Active verified: true})
-                           (User {name: "Edsger" age: 72 status: .Archived verified: false})])
+  (let [users ([]User [(User :name "Ada" :age 36 :status .Active :verified true)
+                           (User :name "Lin" :age 17 :status .Paused :verified false)
+                           (User :name "Grace" :age 45 :status .Active :verified true)
+                           (User :name "Edsger" :age 72 :status .Archived :verified false)])
         active-users (arr.filter active? users)
         total (arr.reduce add-age 0 active-users)]
     (defer (delete active-users))
     total))
 
 (defn first-active-name [] -> string
-  (let [users ([]User [(User {name: "Ada" age: 36 status: .Active verified: true})
-                           (User {name: "Lin" age: 17 status: .Paused verified: false})
-                           (User {name: "Grace" age: 45 status: .Active verified: true})
-                           (User {name: "Edsger" age: 72 status: .Archived verified: false})])
+  (let [users ([]User [(User :name "Ada" :age 36 :status .Active :verified true)
+                           (User :name "Lin" :age 17 :status .Paused :verified false)
+                           (User :name "Grace" :age 45 :status .Active :verified true)
+                           (User :name "Edsger" :age 72 :status .Archived :verified false)])
         active-users (arr.filter active? users)
         active-names (arr.map .name active-users)
         name (arr.first active-names)]
@@ -63,29 +63,29 @@
     name))
 
 (defn age-for-ada [] -> int
-  (let [users ([]User [(User {name: "Ada" age: 36 status: .Active verified: true})
-                           (User {name: "Lin" age: 17 status: .Paused verified: false})
-                           (User {name: "Grace" age: 45 status: .Active verified: true})
-                           (User {name: "Edsger" age: 72 status: .Archived verified: false})])
+  (let [users ([]User [(User :name "Ada" :age 36 :status .Active :verified true)
+                           (User :name "Lin" :age 17 :status .Paused :verified false)
+                           (User :name "Grace" :age 45 :status .Active :verified true)
+                           (User :name "Edsger" :age 72 :status .Archived :verified false)])
         users-by-name (arr.index-by .name users)
         ada (get users-by-name "Ada")]
     (defer (delete users-by-name))
     ada.age))
 
 (defn status-run-count [] -> int
-  (let [users ([]User [(User {name: "Ada" age: 36 status: .Active verified: true})
-                           (User {name: "Grace" age: 45 status: .Active verified: true})
-                           (User {name: "Lin" age: 17 status: .Paused verified: false})
-                           (User {name: "Edsger" age: 72 status: .Archived verified: false})])
+  (let [users ([]User [(User :name "Ada" :age 36 :status .Active :verified true)
+                           (User :name "Grace" :age 45 :status .Active :verified true)
+                           (User :name "Lin" :age 17 :status .Paused :verified false)
+                           (User :name "Edsger" :age 72 :status .Archived :verified false)])
         status-runs (arr.partition-by .status users)]
     (defer (delete status-runs))
     (count status-runs)))
 
 (defn active-status-group-count [] -> int
-  (let [users ([]User [(User {name: "Ada" age: 36 status: .Active verified: true})
-                           (User {name: "Lin" age: 17 status: .Paused verified: false})
-                           (User {name: "Grace" age: 45 status: .Active verified: true})
-                           (User {name: "Edsger" age: 72 status: .Archived verified: false})])
+  (let [users ([]User [(User :name "Ada" :age 36 :status .Active :verified true)
+                           (User :name "Lin" :age 17 :status .Paused :verified false)
+                           (User :name "Grace" :age 45 :status .Active :verified true)
+                           (User :name "Edsger" :age 72 :status .Archived :verified false)])
         by-status (arr.group-by .status users)
         active-users by-status[.Active]]
     (defer
@@ -95,10 +95,10 @@
     (count active-users)))
 
 (defn youngest-user-name [] -> string
-  (let [users ([]User [(User {name: "Ada" age: 36 status: .Active verified: true})
-                           (User {name: "Lin" age: 17 status: .Paused verified: false})
-                           (User {name: "Grace" age: 45 status: .Active verified: true})
-                           (User {name: "Edsger" age: 72 status: .Archived verified: false})])
+  (let [users ([]User [(User :name "Ada" :age 36 :status .Active :verified true)
+                           (User :name "Lin" :age 17 :status .Paused :verified false)
+                           (User :name "Grace" :age 45 :status .Active :verified true)
+                           (User :name "Edsger" :age 72 :status .Archived :verified false)])
         by-age (arr.sort-by .age users)
         first (arr.first by-age)
         name first.name]
@@ -106,38 +106,38 @@
     name))
 
 (defn youngest-user-name-in-place [] -> string
-  (let [users ([dynamic]User [(User {name: "Ada" age: 36 status: .Active verified: true})
-                                  (User {name: "Lin" age: 17 status: .Paused verified: false})
-                                  (User {name: "Grace" age: 45 status: .Active verified: true})
-                                  (User {name: "Edsger" age: 72 status: .Archived verified: false})])]
+  (let [users ([dynamic]User [(User :name "Ada" :age 36 :status .Active :verified true)
+                                  (User :name "Lin" :age 17 :status .Paused :verified false)
+                                  (User :name "Grace" :age 45 :status .Active :verified true)
+                                  (User :name "Edsger" :age 72 :status .Archived :verified false)])]
     (defer (delete users))
     (arr.sort-by! .age users)
     (let [first (arr.first users)]
       first.name)))
 
 (defn third-user-name [] -> string
-  (let [users ([]User [(User {name: "Ada" age: 36 status: .Active verified: true})
-                           (User {name: "Lin" age: 17 status: .Paused verified: false})
-                           (User {name: "Grace" age: 45 status: .Active verified: true})
-                           (User {name: "Edsger" age: 72 status: .Archived verified: false})])]
+  (let [users ([]User [(User :name "Ada" :age 36 :status .Active :verified true)
+                           (User :name "Lin" :age 17 :status .Paused :verified false)
+                           (User :name "Grace" :age 45 :status .Active :verified true)
+                           (User :name "Edsger" :age 72 :status .Archived :verified false)])]
     (let [third (arr.nth 2 users)]
       third.name)))
 
 (defn all-active-users-adults? [] -> bool
-  (let [users ([]User [(User {name: "Ada" age: 36 status: .Active verified: true})
-                           (User {name: "Lin" age: 17 status: .Paused verified: false})
-                           (User {name: "Grace" age: 45 status: .Active verified: true})
-                           (User {name: "Edsger" age: 72 status: .Archived verified: false})])
+  (let [users ([]User [(User :name "Ada" :age 36 :status .Active :verified true)
+                           (User :name "Lin" :age 17 :status .Paused :verified false)
+                           (User :name "Grace" :age 45 :status .Active :verified true)
+                           (User :name "Edsger" :age 72 :status .Archived :verified false)])
         active-users (arr.filter active? users)
         all-adults? (arr.every? adult? active-users)]
     (defer (delete active-users))
     all-adults?))
 
 (defn first-adult-name [] -> string
-  (let [users ([]User [(User {name: "Ada" age: 36 status: .Active verified: true})
-                           (User {name: "Lin" age: 17 status: .Paused verified: false})
-                           (User {name: "Grace" age: 45 status: .Active verified: true})
-                           (User {name: "Edsger" age: 72 status: .Archived verified: false})])
+  (let [users ([]User [(User :name "Ada" :age 36 :status .Active :verified true)
+                           (User :name "Lin" :age 17 :status .Paused :verified false)
+                           (User :name "Grace" :age 45 :status .Active :verified true)
+                           (User :name "Edsger" :age 72 :status .Archived :verified false)])
         [first-adult _] (arr.find adult? users)]
     first-adult.name))
 
@@ -145,7 +145,7 @@
   (println (active-count)))
 
 (comment
-  (let [user (User {name: "Ada" age: 36 status: .Active verified: true})]
+  (let [user (User :name "Ada" :age 36 :status .Active :verified true)]
     user.name)
   ;; => Ada
 

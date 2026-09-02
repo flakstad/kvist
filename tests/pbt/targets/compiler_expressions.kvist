@@ -10,17 +10,17 @@
 (defn identity-float [value: f64] -> f64
   value)
 
-(defstruct Pbt-Point {
+(defstruct Pbt-Point [
   x: int
   y: int
   weight: int
   active?: bool
-})
+])
 
-(defstruct Pbt-Box {
+(defstruct Pbt-Box [
   point: Pbt-Point
   bias: int
-})
+])
 
 (defn pbt-point-score [point: Pbt-Point] -> int
   (+ (* point.x 31)
@@ -32,16 +32,16 @@
   (+ (* (pbt-point-score box.point) 7) box.bias))
 
 (defenum Pbt-Phase {
-  Queued: 2
-  Running: 5
-  Done: 9
-  Failed: 14
+  :Queued 2
+  :Running 5
+  :Done 9
+  :Failed 14
 })
 
-(defstruct Pbt-Job {
+(defstruct Pbt-Job [
   phase: Pbt-Phase
   priority: int
-})
+])
 
 (defn pbt-phase-score [phase: Pbt-Phase] -> int
   (case phase
@@ -54,25 +54,25 @@
 (defn pbt-job-score [job: Pbt-Job] -> int
   (+ (* (pbt-phase-score job.phase) 31) job.priority))
 
-(defstruct Pbt-Single {
+(defstruct Pbt-Single [
   value: int
-})
+])
 
-(defstruct Pbt-Pair {
+(defstruct Pbt-Pair [
   left: int
   right: int
-})
+])
 
-(defunion Pbt-Value {
+(defunion Pbt-Value [
   single: Pbt-Single
   pair: Pbt-Pair
   raw: int
-})
+])
 
-(defstruct Pbt-Envelope {
+(defstruct Pbt-Envelope [
   value: Pbt-Value
   bias: int
-})
+])
 
 (defn pbt-value-score [value: Pbt-Value] -> int
   (case value
@@ -157,7 +157,7 @@
 (defn pbt-last-affine [scale: int, offset: int, value: int] -> int
   (+ (* value scale) offset))
 
-(defn pbt-call-score [a: int, b: int = 7, c: int = 11, d: int = 13] -> int
+(defn pbt-call-score [a: int, b: int :default 7, c: int :default 11, d: int :default 13] -> int
   (+ (* a 31) (* b 17) (* c 7) d))
 
 (defn pbt-generic-same? [value: $T, expected: T] -> bool

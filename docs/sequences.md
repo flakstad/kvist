@@ -187,14 +187,14 @@ many values.
 ```clojure
 (import soa "kvist:soa")
 
-(defstruct Particle {
+(defstruct Particle [
   x: f32
   y: f32
   mass: f32
-})
+])
 
 (let [particles (soa.make Particle 1024) :defer]
-  (soa.push! &particles (Particle {x: 1 y: 2 mass: 3}))
+  (soa.push! &particles (Particle :x 1 :y 2 :mass 3))
   (set! particles.x[0] 4)
   (soa.scale! particles .mass 0.5))
 ```

@@ -7,15 +7,15 @@
 (defenum Http-Status
   "Small explicit-status enum."
   {
-  OK: 200
-  Not-Found: 404
+  :OK 200
+  :Not-Found 404
 })
 
-(defstruct Endpoint {
+(defstruct Endpoint [
   path: string
   status: Http-Status
   tag: keyword
-})
+])
 
 (defn status-code [status: Http-Status] -> int
   (int status))
@@ -27,20 +27,20 @@
     "unknown"))
 
 (defn endpoint-summary [] -> string
-  (let [endpoint (Endpoint {path: "/health" status: .OK tag: :health})]
+  (let [endpoint (Endpoint :path "/health" :status .OK :tag :health)]
     (if (= endpoint.status .OK)
       endpoint.path
       "")))
 
 (defn shorthand-status-code [] -> int
-  (let [endpoint (Endpoint {path: "/health" status: .Not-Found tag: :missing})]
+  (let [endpoint (Endpoint :path "/health" :status .Not-Found :tag :missing)]
     (status-code endpoint.status)))
 
 (defn endpoint-tag [endpoint: Endpoint] -> keyword
   endpoint.tag)
 
 (defn main []
-  (let [endpoint (Endpoint {path: "/health" status: .OK tag: :health})]
+  (let [endpoint (Endpoint :path "/health" :status .OK :tag :health)]
     (println (status-label endpoint.status))
     (println (endpoint-tag endpoint))))
 
@@ -54,7 +54,7 @@
   (status-label .Not-Found)
   ;; => not found
 
-  (endpoint-tag (Endpoint {path: "/health" status: .OK tag: :health}))
+  (endpoint-tag (Endpoint :path "/health" :status .OK :tag :health))
   ;; => :health
 
   (endpoint-summary)

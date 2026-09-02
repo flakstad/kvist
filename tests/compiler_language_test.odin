@@ -401,9 +401,9 @@ reject_internal_lowering_call_names_in_source :: proc(t: ^testing.T) {
 
     source_assoc := `(package main)
 
-(defstruct Point {
+(defstruct Point [
   x: int
-})
+])
 
 (defn bad [point: Point] -> Point
   (kvist-prim-assoc point .x 1))`
@@ -418,9 +418,9 @@ reject_internal_lowering_call_names_in_source :: proc(t: ^testing.T) {
 
     source_update := `(package main)
 
-(defstruct Point {
+(defstruct Point [
   x: int
-})
+])
 
 (defn bad [point: Point] -> Point
   (kvist-prim-update point .x + 1))`
@@ -1247,7 +1247,7 @@ compile_if_ok_expression_with_expected_type :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "x, err := read_count()"), true)
-    testing.expect_value(t, strings.contains(output, "value: int = (x if (err) == (os.Error{}) else 0)"), true)
+    testing.expect_value(t, strings.contains(output, "value: int = (x if (err) == (type_of(err){}) else 0)"), true)
 }
 
 @(test)
@@ -1298,7 +1298,7 @@ compile_final_if_ok_uses_proc_return_type :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "x, err := read_count()"), true)
-    testing.expect_value(t, strings.contains(output, "if (err) == (os.Error{}) {"), true)
+    testing.expect_value(t, strings.contains(output, "if (err) == (type_of(err){}) {"), true)
     testing.expect_value(t, strings.contains(output, "return x"), true)
     testing.expect_value(t, strings.contains(output, "return 0"), true)
 }
@@ -1454,13 +1454,13 @@ compile_let_or_break_and_or_continue_bindings :: proc(t: ^testing.T) {
 compile_defiter_call_materializes_in_expression_context :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct File_Source {
+(defstruct File_Source [
   items: []string
   index: int
-})
+])
 
 (defn open-files [items: []string] -> File_Source
-  (File_Source {items: items index: 0}))
+  (File_Source :items items :index 0))
 
 (defn next-file [src: ^File_Source] -> [path: string ok: bool]
   (return "" false))
@@ -1491,12 +1491,12 @@ compile_defiter_call_materializes_in_expression_context :: proc(t: ^testing.T) {
 reject_defiter_next_wrong_return_shape :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct File_Source {
+(defstruct File_Source [
   index: int
-})
+])
 
 (defn open-files [] -> File_Source
-  (File_Source {index: 0}))
+  (File_Source :index 0))
 
 (defn next-file [src: ^File_Source] -> [path: int ok: bool]
   (return 0 false))
@@ -1524,12 +1524,12 @@ reject_defiter_next_wrong_return_shape :: proc(t: ^testing.T) {
 reject_defiter_dispose_return_value :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct File_Source {
+(defstruct File_Source [
   index: int
-})
+])
 
 (defn open-files [] -> File_Source
-  (File_Source {index: 0}))
+  (File_Source :index 0))
 
 (defn next-file [src: ^File_Source] -> [path: string ok: bool]
   (return "" false))
@@ -1630,15 +1630,15 @@ compile_case_stmt_vector_clause_matches_vector_value :: proc(t: ^testing.T) {
 compile_mut_bang_assignment_place_forms :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Point {
+(defstruct Point [
   x: int
   y: int
   active?: bool
-})
+])
 
   (defn mutate [total: ^int] -> int
   (let [xs ([dynamic]int [1 2 3])
-        point (Point {x: 4 y: 5 active?: false})]
+        point (Point :x 4 :y 5 :active? false)]
     (mut! point.y += 4)
     (mut! (get point .y) += 1)
     (mut! (get xs 1) -= 2)
@@ -1740,7 +1740,7 @@ compile_function_calls_support_positional_and_named_args :: proc(t: ^testing.T) 
 
 (defn main [] -> int
   (let [first (foo 1 2 3)
-        second (foo {a: 4 b: 5 c: 6})]
+        second (foo :c 6 :a 4 :b 5)]
     (+ first second)))`
 
     output, err, ok := kvist.compile_source(source)
@@ -1756,6 +1756,29 @@ compile_function_calls_support_positional_and_named_args :: proc(t: ^testing.T) 
 }
 
 @(test)
+map_arguments_are_always_one_positional_value :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn handle [message: Data] -> int
+  1)
+
+(defn main [] -> int
+  (handle {:message "hei"}))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return handle("), true)
+    testing.expect_value(t, strings.contains(output, "handle(message ="), false)
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_map"), true)
+}
+
+@(test)
 reject_duplicate_named_call_arguments :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -1763,7 +1786,7 @@ reject_duplicate_named_call_arguments :: proc(t: ^testing.T) {
   a)
 
 (defn main [] -> int
-  (foo {a: 1 a: 2}))`
+  (foo :a 1 :a 2))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -1771,14 +1794,14 @@ reject_duplicate_named_call_arguments :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "duplicate named argument a:"), true)
+    testing.expect_value(t, strings.contains(err.message, "duplicate named argument :a"), true)
 }
 
 @(test)
 compile_function_calls_fill_trailing_default_args_positionally :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defn greet [name: string, punctuation: string = "!"] -> string
+(defn greet [name: string, punctuation: string :default "!"] -> string
   (+ name punctuation))
 
 (defn main [] -> string
@@ -1800,11 +1823,11 @@ compile_function_calls_fill_trailing_default_args_positionally :: proc(t: ^testi
 compile_named_function_calls_fill_missing_default_args :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defn greet [name: string, punctuation: string = "!"] -> string
+(defn greet [name: string, punctuation: string :default "!"] -> string
   (+ name punctuation))
 
 (defn main [] -> string
-  (greet {name: "Ada"}))`
+  (greet :name "Ada"))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -1821,11 +1844,11 @@ compile_named_function_calls_fill_missing_default_args :: proc(t: ^testing.T) {
 reject_named_function_calls_missing_required_args :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defn greet [name: string, punctuation: string = "!"] -> string
+(defn greet [name: string, punctuation: string :default "!"] -> string
   (+ name punctuation))
 
 (defn main [] -> string
-  (greet {punctuation: "?"}))`
+  (greet :punctuation "?"))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -1834,18 +1857,18 @@ reject_named_function_calls_missing_required_args :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
 
-    testing.expect_value(t, strings.contains(err.message, "greet missing required argument name:"), true)
+    testing.expect_value(t, strings.contains(err.message, "greet missing required argument :name"), true)
 }
 
 @(test)
 compile_function_calls_support_mixed_positional_and_named_args :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defn place [name: string, x: int, y: int, label: string = "ok"] -> string
+(defn place [name: string, x: int, y: int, label: string :default "ok"] -> string
   label)
 
 (defn main [] -> string
-  (place "enemy" {x: 10 y: 20}))`
+  (place "enemy" :x 10 :y 20))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -1866,7 +1889,7 @@ reject_mixed_call_named_argument_overlapping_positional_argument :: proc(t: ^tes
   x)
 
 (defn main [] -> int
-  (place "enemy" {name: "boss" x: 10 y: 20}))`
+  (place "enemy" :name "boss" :x 10 :y 20))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -1874,7 +1897,7 @@ reject_mixed_call_named_argument_overlapping_positional_argument :: proc(t: ^tes
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "named argument name: overlaps positional argument 1"), true)
+    testing.expect_value(t, strings.contains(err.message, "named argument :name overlaps positional argument 1"), true)
 }
 
 @(test)
@@ -1882,7 +1905,7 @@ compile_def_overload_proc_group :: proc(t: ^testing.T) {
     source := `(package main)
 (import fmt "core:fmt")
 
-(defstruct User {name: string})
+(defstruct User [name: string])
 
 (defn render-int [value: int] -> string
   (fmt.aprintf "int:%d" value))

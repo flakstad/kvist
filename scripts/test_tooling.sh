@@ -103,7 +103,7 @@ if ! grep -q '(log-lines \[lines: \[\]string\] -> Log_Source :yield string)' "$t
 fi
 
 ./kvist xref examples/collections/log-source.kvist log-lines > "$tmp_dir/xref.txt"
-if ! grep -q "$(printf 'log-source.kvist:26:10\titerator\tlog-lines')" "$tmp_dir/xref.txt"; then
+if ! grep -q "$(printf 'log-source.kvist:23:10\titerator\tlog-lines')" "$tmp_dir/xref.txt"; then
     printf 'failed: xref output did not point at log-lines definition\n' >&2
     cat "$tmp_dir/xref.txt" >&2
     exit 1
@@ -632,14 +632,14 @@ cat > "$tmp_dir/decl-eval.kvist" <<'EOF'
 (package main)
 (import fmt "core:fmt")
 
-(defstruct Greeting {
+(defstruct Greeting [
   message: string
-})
+])
 
 (defn main []
   (fmt.println "hello"))
 EOF
-./kvist eval "$tmp_dir/decl-eval.kvist" '(defstruct Greeting {message: string})' --check
+./kvist eval "$tmp_dir/decl-eval.kvist" '(defstruct Greeting [message: string])' --check
 ./kvist eval "$tmp_dir/decl-eval.kvist" '(import fmt "core:fmt")' --check
 ./kvist eval "$tmp_dir/decl-eval.kvist" '(defn main [] (fmt.println "hello"))' --check
 
@@ -746,7 +746,7 @@ if command -v emacs >/dev/null 2>&1; then
              (unwind-protect
                  (progn
                    (with-temp-file file
-                     (insert \"(package main)\\n(import fmt \\\"core:fmt\\\")\\n(import arr \\\"kvist:arr\\\")\\n(import debug \\\"kvist:debug\\\")\\n(import condition \\\"kvist:condition\\\")\\n\\n;; Adds two ints.\\n(defn add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(defn add-two [a: int, b: int] -> int\\n  (add a b))\\n\\n(defn main []\\n  (fmt.println \\\"from main\\\"))\\n\\n(defn announce []\\n  (fmt.println \\\"announced\\\"))\\n\\n(defstruct Pair {\\n  left: int\\n  right: string\\n})\\n\\n(comment\\n  (add 1 2)\\n  (add-two 1 2)\\n  (with-allocator [allocator context.temp_allocator]\\n    (add 2 1))\\n  (if-ok [value err (read)] value 0)\\n  (Pair {left: 1 right: \\\"two\\\"})\\n  ([dynamic]int [0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21])\\n  (map[string]int {\\\"a\\\" 7})\\n  (announce))\\n\"))
+                     (insert \"(package main)\\n(import fmt \\\"core:fmt\\\")\\n(import arr \\\"kvist:arr\\\")\\n(import debug \\\"kvist:debug\\\")\\n(import condition \\\"kvist:condition\\\")\\n\\n;; Adds two ints.\\n(defn add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(defn add-two [a: int, b: int] -> int\\n  (add a b))\\n\\n(defn main []\\n  (fmt.println \\\"from main\\\"))\\n\\n(defn announce []\\n  (fmt.println \\\"announced\\\"))\\n\\n(defstruct Pair [\\n  left: int\\n  right: string\\n])\\n\\n(comment\\n  (add 1 2)\\n  (add-two 1 2)\\n  (with-allocator [allocator context.temp_allocator]\\n    (add 2 1))\\n  (if-ok [value err (read)] value 0)\\n  (Pair :left 1 :right \\\"two\\\")\\n  ([dynamic]int [0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21])\\n  (map[string]int {\\\"a\\\" 7})\\n  (announce))\\n\"))
                    (find-file file)
                    (kvist-mode)
                    (setq kvist-test-source-buffer (current-buffer))
@@ -782,7 +782,7 @@ if command -v emacs >/dev/null 2>&1; then
                        (error \"Expected fmt.println docs\")))
                    (let ((docs (kvist--symbol-doc-candidates \"if-ok\")))
                      (unless (and docs
-                                  (string-match-p \"zero error\" (plist-get (car docs) :doc))
+                                  (string-match-p \"zero value\" (plist-get (car docs) :doc))
                                   (string-match-p \"value\" (plist-get (car docs) :doc)))
                        (error \"Expected if-ok built-in docs, got: %S\" docs)))
                    (with-temp-buffer
@@ -825,7 +825,7 @@ if command -v emacs >/dev/null 2>&1; then
                    (call-interactively (quote kvist-doc-at-point))
                    (let ((doc-text (with-current-buffer kvist-doc-buffer-name
                                      (buffer-substring-no-properties (point-min) (point-max)))))
-                     (unless (and (string-match-p \"zero error\" doc-text)
+                     (unless (and (string-match-p \"zero value\" doc-text)
                                   (string-match-p \"value\" doc-text))
                        (error \"Expected displayed if-ok docs, got: %s\" doc-text)))
                    (let ((defs (xref-backend-definitions (quote kvist) \"add\")))
@@ -1156,7 +1156,7 @@ if command -v emacs >/dev/null 2>&1; then
                        (error \"Expected typed live inspection, got: %s\"
                               inspect-text)))
                    (goto-char (point-min))
-                   (search-forward \"(Pair {left: 1 right: \\\"two\\\"})\")
+                   (search-forward \"(Pair :left 1 :right \\\"two\\\")\")
                    (call-interactively (quote kvist-inspect-form-at-point))
                    (kvist-repl-wait)
                    (let ((inspect-text
@@ -1294,7 +1294,7 @@ if command -v emacs >/dev/null 2>&1; then
                      (next-error)
                      (unless (equal (current-buffer) source-buffer)
                        (error \"Expected next-error from source to stay in Kvist source buffer\"))
-                     (unless (= (line-number-at-pos) 7)
+                     (unless (= (line-number-at-pos) 9)
                        (error \"Expected next-error from source to jump to diagnostic line, got %s\"
                               (line-number-at-pos)))
                      (unless (eq next-error-last-buffer (get-buffer kvist-result-buffer-name))

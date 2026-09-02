@@ -51,12 +51,12 @@ Call imported procedures normally:
     0))
 ```
 
-Use `(type ...)` for polymorphic Odin types when needed:
+Use `(typeid ...)` for polymorphic Odin types when needed:
 
 ```clojure
 (import queue "core:container/queue")
 
-(let [q: (type queue.Queue int) {}]
+(let [q: (typeid queue.Queue int) (zero (typeid queue.Queue int))]
   (let [err (queue.init (addr q))]
     (if (= err nil)
       (do

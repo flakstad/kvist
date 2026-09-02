@@ -185,7 +185,7 @@ timing_finish :: proc(status: int) -> int {
         fmt.eprintln("  cache status: ", timing_report.cache_status)
         if timing_report.fingerprint_cache_status != "" {
             fmt.eprintf(
-                "  fingerprint cache: %s (%d reused, %d hashed)\n",
+                "  fingerprint :cache %s (%d reused, %d hashed)\n",
                 timing_report.fingerprint_cache_status,
                 timing_report.fingerprint_files_reused,
                 timing_report.fingerprint_files_hashed,

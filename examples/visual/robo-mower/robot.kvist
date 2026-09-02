@@ -39,7 +39,7 @@
 (def Two-Pi: f32 6.283185307179586)
 
 (defstruct Robot
-  {x: f32
+  [x: f32
    y: f32
    heading: f32
    speed: f32
@@ -62,21 +62,21 @@
    blade-on: bool
    blade-load: f32
    no-cut-time: f32
-   seed: u32})
+   seed: u32])
 
 (defstruct Sensors
-  {front: f32
+  [front: f32
    front-kind: int
    left: f32
    right: f32
    wire: f32
    blade-load: f32
-   blocked: bool})
+   blocked: bool])
 
 (defstruct Command
-  {speed: f32
+  [speed: f32
    turn: f32
-   blade: bool})
+   blade: bool])
 
 (defn normalize-angle
   "Normalize an angle to [-pi, pi]."
@@ -119,7 +119,7 @@
 (defn make-robot
   "Create a robot at the default pose."
   [] -> Robot
-  (let [robot (Robot {})]
+  (let [robot (Robot [])]
     (reset-robot! (addr robot))
     robot))
 
@@ -220,7 +220,7 @@
 (defn command
   "Construct a drive command."
   [speed: f32, turn: f32, blade: bool] -> Command
-  (Command {speed: speed turn: turn blade: blade}))
+  (Command :speed speed :turn turn :blade blade))
 
 (defn set-drive-metrics!
   "Update live actuator telemetry from linear speed turn rate and blade state."

@@ -108,8 +108,8 @@ write_compiler_callback_expression :: proc(
 		stats.aggregate_capture += 1
 		scale := pbt.draw(t, pbt.int_range(-3, 3))
 		offset := pbt.draw(t, pbt.int_range(-5, 5))
-		strings.write_string(builder, "(let [point (Pbt-Point {x: ")
-		fmt.sbprintf(builder, "%d y: 0 weight: 0 active?: false}) offset %d] (pbt-apply-int (fn [x: int] -> int (+ (* x point.x) offset)) %d))", scale, offset, value)
+		strings.write_string(builder, "(let [point (Pbt-Point :x ")
+		fmt.sbprintf(builder, "%d :y 0 :weight 0 :active? false) offset %d] (pbt-apply-int (fn [x: int] -> int (+ (* x point.x) offset)) %d))", scale, offset, value)
 		return value * scale + offset
 	case 3:
 		stats.forwarded_capture += 1
@@ -168,8 +168,8 @@ write_compiler_callback_expression :: proc(
 		stats.aggregate_capture += 1
 		x := pbt.draw(t, pbt.int_range(-5, 5))
 		y := pbt.draw(t, pbt.int_range(-5, 5))
-		strings.write_string(builder, "(let [point (Pbt-Point {x: ")
-		fmt.sbprintf(builder, "%d y: %d weight: 0 active?: false})] (pbt-apply-int (fn [value: int] -> int (+ value point.x point.y)) %d))", x, y, value)
+		strings.write_string(builder, "(let [point (Pbt-Point :x ")
+		fmt.sbprintf(builder, "%d :y %d :weight 0 :active? false)] (pbt-apply-int (fn [value: int] -> int (+ value point.x point.y)) %d))", x, y, value)
 		return value + x + y
 	}
 	return 0

@@ -1,6 +1,6 @@
 (package order-independent)
 
-(defstruct Box {
+(defstruct Box [
   value: int :default default-box-value
   values: [dynamic]int :default []
-})
+])

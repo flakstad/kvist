@@ -110,18 +110,18 @@ write_compiler_call_resolution_expression :: proc(
 	case 3:
 		stats.pure_named += 1
 		stats.reordered_named += 1
-		fmt.sbprintf(builder, "(pbt-call-score {{d: %d b: %d a: %d c: %d}})", d, b, a, c)
+		fmt.sbprintf(builder, "(pbt-call-score :d %d :b %d :a %d :c %d)", d, b, a, c)
 		return pbt_call_score_model(a, b, c, d)
 	case 4:
 		stats.pure_named += 1
 		stats.default_tail += 1
-		fmt.sbprintf(builder, "(pbt-call-score {{a: %d}})", a)
+		fmt.sbprintf(builder, "(pbt-call-score :a %d)", a)
 		return pbt_call_score_model(a, 7, 11, 13)
 	case 5:
 		stats.mixed_named += 1
 		stats.reordered_named += 1
 		stats.default_tail += 1
-		fmt.sbprintf(builder, "(pbt-call-score %d {{c: %d b: %d}})", a, c, b)
+		fmt.sbprintf(builder, "(pbt-call-score %d :c %d :b %d)", a, c, b)
 		return pbt_call_score_model(a, b, c, 13)
 	case 6:
 		stats.generic_int += 1

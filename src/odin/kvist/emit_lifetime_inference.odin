@@ -1364,6 +1364,7 @@ owned_let_result_usage_error :: proc(
                             binding.defer_with_cleanup
         if binding.name != "" &&
            let_scope_transfers_owned_name(
+               e,
                bindings[binding_idx+1:],
                body,
                binding.name,
@@ -1437,6 +1438,29 @@ owned_result_usage_error :: proc(form: CST_Form, allow_root_owned: bool, e: ^Emi
     // composite_literal_transfers_owned_name.
     if allow_root_owned &&
        form.kind == .List &&
+       len(form.items) >= 1 &&
+       form.items[0].kind == .Symbol {
+        if form_is_struct_or_union_constructor(e, form) {
+            constructor_args := form.items[1:]
+            if len(constructor_args) == 1 && constructor_args[0].kind == .Vector {
+                constructor_args = constructor_args[0].items[:]
+            }
+            named_constructor := keyword_arg_tail_is_syntax(constructor_args, 0)
+            for arg, arg_index in constructor_args {
+                if named_constructor && arg_index%2 == 0 {
+                    continue
+                }
+                err_item, bad_item := owned_result_usage_error(arg, true, e)
+                if bad_item {
+                    return err_item, true
+                }
+            }
+            return {}, false
+        }
+    }
+
+    if allow_root_owned &&
+       form.kind == .List &&
        len(form.items) == 2 &&
        form.items[0].kind == .Symbol &&
        form.items[1].kind == .Brace {
@@ -1504,8 +1528,8 @@ owned_result_usage_error :: proc(form: CST_Form, allow_root_owned: bool, e: ^Emi
 }
 
 form_has_nested_owned_value :: proc(form: CST_Form, e: ^Emitter = nil) -> bool {
-    if form_is_owned_constructor_result(form) || form_is_literal_constructor_call(form) ||
-       form_is_named_arg_brace(form) || form_is_transform_loop_call(form) {
+    if form_is_owned_constructor_result(form) || form_is_literal_constructor_call(form, e) ||
+       form_is_transform_loop_call(form) {
         return false
     }
     #partial switch form.kind {
@@ -1549,8 +1573,7 @@ form_has_nested_owned_value :: proc(form: CST_Form, e: ^Emitter = nil) -> bool {
                     form_produces_owned_managed_type(e, item, expected_type)
                 delete(expected_type)
             }
-            if !form_is_named_arg_brace(item) &&
-               (form_produces_owned_value(item, e) ||
+            if (form_produces_owned_value(item, e) ||
                 item_is_owned_managed ||
                 form_has_nested_owned_value(item, e)) {
                 return true

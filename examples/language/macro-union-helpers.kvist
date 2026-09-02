@@ -4,11 +4,12 @@
   (if (= (count variants) 0)
     (forms)
     (let [tag (first variants)
+          tag-keyword (keyword (name tag))
           value-type (nth variants 1)
           ctor-name (symbol (str "make-" (name union-name) "-" (name tag)))]
       (forms
         `(defn ~ctor-name [value: ~value-type] -> ~union-name
-           (~union-name {~tag value}))
+           (~union-name ~tag-keyword value))
         (emit-union-ctors union-name (rest (rest variants)))))))
 
 (defmacro defunion+ctors [name variants]
@@ -16,11 +17,11 @@
     `(defunion ~name ~variants)
     (emit-union-ctors name variants)))
 
-(defunion+ctors Value {
+(defunion+ctors Value [
   i: int
   s: string
   ok: bool
-})
+])
 
 (defn macro-union-helpers-demo []
   (let [number (make-Value-i 42)

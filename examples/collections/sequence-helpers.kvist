@@ -42,9 +42,9 @@
     (return (* x x) true)
     (return 0 false)))
 
-(defstruct Segment {
+(defstruct Segment [
   values: []int
-})
+])
 
 (defn segment-values [segment: Segment] -> []int
   segment.values)
@@ -317,9 +317,9 @@
     (count runs)))
 
 (defn flattened-total [] -> int
-  (let [segments ([]Segment [(Segment {values: ([]int [1 2])})
-                                 (Segment {values: ([]int [3])})
-                                 (Segment {values: ([]int [4 5])})])
+  (let [segments ([]Segment [(Segment :values ([]int [1 2]))
+                                 (Segment :values ([]int [3]))
+                                 (Segment :values ([]int [4 5]))])
         values (mapcat segment-values segments)]
     (defer (delete values))
     (reduce add 0 values)))

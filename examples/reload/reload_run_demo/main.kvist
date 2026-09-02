@@ -4,14 +4,14 @@
 (import time "core:time")
 
 (defstruct Program_State
-  {request-count: int
+  [request-count: int
    last-route: string
-   last-response: string})
+   last-response: string])
 
 (defstruct App_State
-  {program: Program_State
+  [program: Program_State
    reload-count: int
-   unload-count: int})
+   unload-count: int])
 
 (def delay: time.Duration (* 1 time.Second))
 
@@ -76,7 +76,7 @@
 (defn main
   "Starts the production application entrypoint."
   []
-  (let [state (App_State {})]
+  (let [state (App_State [])]
     (init &state)
     (on-load &state false)
     (run &state)))

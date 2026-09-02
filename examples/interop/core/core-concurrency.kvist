@@ -11,10 +11,10 @@
 (import chan "core:sync/chan")
 (import thread "core:thread")
 
-(defstruct Counter {
+(defstruct Counter [
   lock: sync.Mutex
   value: int
-})
+])
 
 (defn send-square [result: (typeid chan.Chan int)]
   ;; Sending on a channel communicates between OS threads. The channel owns
@@ -44,7 +44,7 @@
 (defn mutex-protected-count [] -> int
   ;; Two joinable threads mutate shared state. The pointer is passed explicitly,
   ;; and the main thread joins.destroys the handles before reading the result.
-  (let [counter (Counter {lock: {} value: 0})
+  (let [counter (Counter :lock (zero sync.Mutex) :value 0)
         a (thread.create-and-start-with-poly-data (addr counter) increment-once)
         b (thread.create-and-start-with-poly-data (addr counter) increment-once)]
     (thread.join a)

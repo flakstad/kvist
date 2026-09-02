@@ -130,13 +130,13 @@ compile_eval_source_prints_block_forms_as_statements :: proc(t: ^testing.T) {
 compile_eval_source_can_load_declaration_form :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Greeting {
+(defstruct Greeting [
   message: string
-})`
+])`
 
-    output, err, ok := kvist.compile_eval_source(source, `(defstruct Greeting {
+    output, err, ok := kvist.compile_eval_source(source, `(defstruct Greeting [
   message: string
-})`)
+])`)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -162,11 +162,11 @@ compile_eval_source_can_load_defstruct_declaration_form :: proc(t: ^testing.T) {
 
 (defstruct Greeting
   "Greeting text."
-  {message: string})`
+  [message: string])`
 
     output, err, ok := kvist.compile_eval_source(source, `(defstruct Greeting
   "Greeting text."
-  {message: string})`)
+  [message: string])`)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -308,12 +308,12 @@ compile_struct_types_reports_source_surface :: proc(t: ^testing.T) {
 (import soa "kvist:soa")
 
 (defstruct Profile
-  {name: string
+  [name: string
    active?: bool
    favorite-key: string
-   tags: (map string (struct {}))
+   tags: (map string (struct []))
    scores: [dynamic]int
-   window: []float})
+   window: []float])
 
 (defn type-map [] -> map[string]string
   (soa.types 'Profile))`
@@ -531,9 +531,9 @@ reject_legacy_thread_helpers :: proc(t: ^testing.T) {
 
     source = `(package main)
 
-(defstruct Request {
+(defstruct Request [
   path: string
-})
+])
 
 (defn main [req: Request] -> int
   (-> req .path count))`
@@ -554,11 +554,11 @@ compile_named_functional_transform_into_and_transduce :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")
 
-(defstruct Order {
+(defstruct Order [
   status: int
   amount: int
   discount: int
-})
+])
 
 (defn paid? [order: Order] -> bool
   (= order.status 2))
@@ -639,13 +639,13 @@ compile_defiter_each_into_and_transduce_consumers :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")
 
-(defstruct File_Source {
+(defstruct File_Source [
   items: []string
   index: int
-})
+])
 
 (defn open-files [items: []string] -> File_Source
-  (File_Source {items: items index: 0}))
+  (File_Source :items items :index 0))
 
 (defn next-file [src: ^File_Source] -> [path: string ok: bool]
   (if (< src.index (count src.items))
@@ -921,7 +921,7 @@ compile_thread_map_with_worker_count :: proc(t: ^testing.T) {
   (* x x))
 
 (defn demo [xs: []int] -> [dynamic]int
-  (p.map-with {workers: 4} square xs))`
+  (p.map-with {:workers 4} square xs))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -946,7 +946,7 @@ compile_thread_map_and_map_with_reuse_helper :: proc(t: ^testing.T) {
 
 (defn demo [xs: []int] -> int
   (let [a (p.map square xs)
-        b (p.map-with {workers: 2} square xs)]
+        b (p.map-with {:workers 2} square xs)]
     (defer (delete a))
     (defer (delete b))
     (+ (count a) (count b))))`
@@ -1199,7 +1199,7 @@ compile_thread_map_with_captured_inline_worker :: proc(t: ^testing.T) {
 
 (defn demo [xs: []int] -> [dynamic]int
   (let [offset 10]
-    (p.map-with {workers: 2}
+    (p.map-with {:workers 2}
       (fn [x: int] -> int
         (+ x offset))
       xs)))`
@@ -1297,7 +1297,7 @@ reject_thread_map_with_non_brace_options :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "while expanding macro p__map-with: parallel.map-with expects options like {workers: n}")
+    testing.expect_value(t, err.message, "while expanding macro p__map-with: parallel.map-with expects options like {:workers n}")
 }
 
 @(test)
@@ -1317,7 +1317,7 @@ reject_thread_map_with_missing_workers :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "while expanding macro p__map-with: parallel.map-with expects {workers: n}")
+    testing.expect_value(t, err.message, "while expanding macro p__map-with: parallel.map-with expects {:workers n}")
 }
 
 @(test)
@@ -1329,7 +1329,7 @@ reject_thread_map_with_unknown_option :: proc(t: ^testing.T) {
   (* x x))
 
 (defn demo [xs: []int] -> [dynamic]int
-  (p.map-with {threads: 4} square xs))`
+  (p.map-with {:threads 4} square xs))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -1379,7 +1379,7 @@ compile_thread_for_with_captured_inline_worker :: proc(t: ^testing.T) {
 
 (defn demo [xs: []int]
   (let [offset 10]
-    (p.for-with {workers: 2}
+    (p.for-with {:workers 2}
       (fn [x: int]
         (println (+ x offset)))
       xs)))`
@@ -1449,7 +1449,7 @@ reject_thread_for_with_unknown_option :: proc(t: ^testing.T) {
   (println x))
 
 (defn demo [xs: []int]
-  (p.for-with {threads: 4} record xs))`
+  (p.for-with {:threads 4} record xs))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -1464,10 +1464,10 @@ reject_thread_for_with_unknown_option :: proc(t: ^testing.T) {
 compile_functional_transform_field_selectors :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct User {
+(defstruct User [
   age: int
   active?: bool
-})
+])
 
 (deftransform active-ages
   (comp
@@ -1605,10 +1605,10 @@ compile_functional_transform_inline_fn_callbacks :: proc(t: ^testing.T) {
 compile_defiter_transform_inline_fn_callbacks :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Num_Source {
+(defstruct Num_Source [
   xs: []int
   idx: int
-})
+])
 
 (defn next-num [src: ^Num_Source] -> [value: int ok: bool]
   (if (< src.idx (count src.xs))
@@ -1619,7 +1619,7 @@ compile_defiter_transform_inline_fn_callbacks :: proc(t: ^testing.T) {
 
 (defiter nums [xs: []int] -> Num_Source :yield int
   :next next-num
-  (Num_Source {xs: xs idx: 0}))
+  (Num_Source :xs xs :idx 0))
 
 (defn total [xs: []int] -> int
   (let [limit 2
@@ -1718,7 +1718,7 @@ compile_functional_transform_map_entry_sources :: proc(t: ^testing.T) {
   (into [dynamic]int entry-scores (map.entries lookup)))
 
 (defn bump-entry [entry: (map.entry string int)] -> (map.entry string int)
-  ((map.entry string int) {key: entry.key value: (+ entry.value 1)}))
+  ((map.entry string int) :key entry.key :value (+ entry.value 1)))
 
 (defn collect-map [lookup: map[string]int] -> map[string]int
   (into map[string]int
@@ -1730,7 +1730,7 @@ compile_functional_transform_map_entry_sources :: proc(t: ^testing.T) {
 (defn collect-map-inline [lookup: map[string]int] -> map[string]int
   (into map[string]int
     (map (fn [entry: (map.entry string int)] -> (map.entry string int)
-           ((map.entry string int) {key: entry.key value: (+ entry.value 1)})))
+           ((map.entry string int) :key entry.key :value (+ entry.value 1))))
     (map.entries lookup)))
 
 (defn collect-inferred-empty [] -> map[string]int
@@ -1857,8 +1857,8 @@ compile_functional_transform_into_set :: proc(t: ^testing.T) {
 (defn even? [x: int] -> bool
   (= (% x 2) 0))
 
-(defn collect [xs: []int] -> (map int (struct {}))
-  (into (map int (struct {})) (filter even?) xs))`
+(defn collect [xs: []int] -> (map int (struct []))
+  (into (map int (struct [])) (filter even?) xs))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -2740,10 +2740,10 @@ compile_thread_first_forms :: proc(t: ^testing.T) {
   Post
 ])
 
-(defstruct Request {
+(defstruct Request [
   method: Method
   path: string
-})
+])
 
 (defn method-name [method: Method] -> string
   (case method
@@ -2779,11 +2779,11 @@ compile_thread_first_forms :: proc(t: ^testing.T) {
 compile_cond_thread_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Request {
+(defstruct Request [
   content-type: keyword
   authenticated?: bool
   trace-id: int
-})
+])
 
 (defn add-trace [req: Request, trace-id: int] -> Request
   (assoc req.trace-id trace-id))
@@ -2815,14 +2815,14 @@ compile_cond_thread_exprs :: proc(t: ^testing.T) {
 compile_as_thread_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Profile {
+(defstruct Profile [
   visits: int
-})
+])
 
-(defstruct User {
+(defstruct User [
   profile: Profile
   age: int
-})
+])
 
 (defn visit [user: User] -> User
   (update user.profile.visits + 1))

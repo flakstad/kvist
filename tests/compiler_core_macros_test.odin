@@ -136,7 +136,7 @@ compile_if_ok_macro :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "value, err := read_count()"), true)
-    testing.expect_value(t, strings.contains(output, "if (err) == (os.Error{})"), true)
+    testing.expect_value(t, strings.contains(output, "if (err) == (type_of(err){})"), true)
     testing.expect_value(t, strings.contains(output, "return value"), true)
     testing.expect_value(t, strings.contains(output, "return 0"), true)
 }
@@ -164,7 +164,7 @@ compile_chained_if_ok_macro :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "a, err := read_count(1)"), true)
-    testing.expect_value(t, strings.contains(output, "if (err) == (os.Error{}) {\n        b, err := read_count(a)"), true)
+    testing.expect_value(t, strings.contains(output, "if (err) == (type_of(err){}) {\n        b, err := read_count(a)"), true)
     testing.expect_value(t, strings.contains(output, "return (a) + (b)"), true)
     testing.expect_value(t, strings.contains(output, "return 0"), true)
 }
@@ -192,7 +192,7 @@ compile_when_ok_macro :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "value, err := read_count()"), true)
-    testing.expect_value(t, strings.contains(output, "if (err) == (os.Error{})"), true)
+    testing.expect_value(t, strings.contains(output, "if (err) == (type_of(err){})"), true)
     testing.expect_value(t, strings.contains(output, "total = value"), true)
     testing.expect_value(t, strings.contains(output, "return total"), true)
 }
@@ -259,7 +259,7 @@ macroexpand_when_ok :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    expected := `(let [[data err] (read-text path)] (if (= err {}) (use data)))
+    expected := `(let [[data err] (read-text path)] (if (= err (zero-of err)) (use data)))
 `
     testing.expect_value(t, output, expected)
 }
@@ -276,7 +276,7 @@ macroexpand_if_ok :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    expected := `(let [[data err] (read-text path)] (if (= err {}) (odin-call "len" data) 0))
+    expected := `(let [[data err] (read-text path)] (if (= err (zero-of err)) (odin-call "len" data) 0))
 `
     testing.expect_value(t, output, expected)
 }
@@ -294,7 +294,7 @@ macroexpand_chained_if_ok :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    expected := `(let [[data err] (read-text path)] (if (= err {}) (let [[cfg err] (parse data)] (if (= err {}) (use cfg) 0)) 0))
+    expected := `(let [[data err] (read-text path)] (if (= err (zero-of err)) (let [[cfg err] (parse data)] (if (= err (zero-of err)) (use cfg) 0)) 0))
 `
     testing.expect_value(t, output, expected)
 }

@@ -144,9 +144,9 @@ write_compiler_union_expression :: proc(
 	case 4:
 		stats.nested_struct += 1
 		bias := pbt.draw(t, pbt.int_range(-8, 8))
-		strings.write_string(builder, "(pbt-envelope-score (Pbt-Envelope {value: ")
+		strings.write_string(builder, "(pbt-envelope-score (Pbt-Envelope :value ")
 		write_compiler_union_value(builder, stats, variant, first, second)
-		fmt.sbprintf(builder, " bias: %d}))", bias)
+		fmt.sbprintf(builder, " :bias %d))", bias)
 		return score * 13 + bias
 	case 5:
 		stats.assoc += 1
@@ -154,9 +154,9 @@ write_compiler_union_expression :: proc(
 		other_variant := pbt.draw(t, pbt.int_range(0, 2))
 		other_first := pbt.draw(t, pbt.int_range(-8, 8))
 		other_second := pbt.draw(t, pbt.int_range(-8, 8))
-		strings.write_string(builder, "(let [original (Pbt-Envelope {value: ")
+		strings.write_string(builder, "(let [original (Pbt-Envelope :value ")
 		write_compiler_union_value(builder, stats, variant, first, second)
-		fmt.sbprintf(builder, " bias: %d}) newer (assoc original.value ", bias)
+		fmt.sbprintf(builder, " :bias %d) newer (assoc original.value ", bias)
 		write_compiler_union_value(builder, stats, other_variant, other_first, other_second)
 		strings.write_string(builder, ")] (+ (pbt-envelope-score original) (pbt-envelope-score newer)))")
 		return (score + compiler_union_score(other_variant, other_first, other_second)) * 13 + bias * 2
@@ -214,16 +214,16 @@ write_compiler_union_value :: proc(
 	switch variant {
 	case 0:
 		stats.raw_payload += 1
-		strings.write_string(builder, "(Pbt-Value {raw: ")
-		fmt.sbprintf(builder, "%d})", first)
+		strings.write_string(builder, "(Pbt-Value :raw ")
+		fmt.sbprintf(builder, "%d)", first)
 	case 1:
 		stats.single_payload += 1
-		strings.write_string(builder, "(Pbt-Value {single: (Pbt-Single {value: ")
-		fmt.sbprintf(builder, "%d})})", first)
+		strings.write_string(builder, "(Pbt-Value :single (Pbt-Single :value ")
+		fmt.sbprintf(builder, "%d))", first)
 	case 2:
 		stats.pair_payload += 1
-		strings.write_string(builder, "(Pbt-Value {pair: (Pbt-Pair {left: ")
-		fmt.sbprintf(builder, "%d right: %d})})", first, second)
+		strings.write_string(builder, "(Pbt-Value :pair (Pbt-Pair :left ")
+		fmt.sbprintf(builder, "%d :right %d))", first, second)
 	}
 }
 

@@ -93,24 +93,33 @@ emit_local_var_stmt :: proc(e: ^Emitter, form: CST_Form) -> (Compile_Error, bool
     ty := ""
     value_index := 2
     is_typed := false
+    type_start := 2
     if len(name) > 0 && name[len(name)-1] == ':' {
         if len(name) == 1 {
             return Compile_Error{message = "defvar expects a name before :", span = target.span}, false
         }
-        parsed_ty, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], 2)
+        name = name[:len(name)-1]
+        is_typed = true
+    } else if len(form.items) > 2 && is_type_separator_form(form.items[2]) {
+        type_start = 3
+        is_typed = true
+    }
+    if is_typed {
+        if type_start >= len(form.items) {
+            return Compile_Error{message = "typed defvar missing type", span = form.span}, false
+        }
+        parsed_ty, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], type_start)
         if !ok_type {
             return err_type, false
         }
         if next_i >= len(form.items) {
-            local_name := map_name(name[:len(name)-1])
+            local_name := map_name(name)
             emit_line(e, fmt.tprintf("%s: %s", local_name, parsed_ty))
             bind_local_type(e, local_name, parsed_ty, mutable = true)
             return {}, true
         }
         ty = parsed_ty
         value_index = next_i
-        name = name[:len(name)-1]
-        is_typed = true
     }
     if value_index+1 != len(form.items) {
         return Compile_Error{message = "defvar expects exactly one value", span = form.items[value_index+1].span}, false

@@ -4,30 +4,30 @@
 
 (defstruct Decode-Error
   "Describe why Data decoding failed and where the incompatible value occurred."
-  {
+  [
   path: Data
   expected: Data-Kind
   actual: Data-Kind
   enum-value?: bool
   expected-type: string
   actual-value: Data
-})
+])
 
 (defn decode-error
   "Construct a decoding error for an expected and actual Data kind."
   [path: Data, expected: Data-Kind, actual: Data-Kind] -> Decode-Error
-  (Decode-Error {path: path expected: expected actual: actual}))
+  (Decode-Error :path path :expected expected :actual actual))
 
 (defn- decode-enum-error
   [path: Data, expected-type: string, actual-value: Data] -> Decode-Error
-  (Decode-Error {
-    path: path
-    expected: .Keyword
-    actual: (kind actual-value)
-    enum-value?: true
-    expected-type: expected-type
-    actual-value: actual-value
-  }))
+  (Decode-Error
+    :path path
+    :expected .Keyword
+    :actual (kind actual-value)
+    :enum-value? true
+    :expected-type expected-type
+    :actual-value actual-value
+  ))
 
 (defmacro decode
   "Decode Data into a native value selected by type.

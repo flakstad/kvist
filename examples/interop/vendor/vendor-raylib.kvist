@@ -19,7 +19,7 @@
   ;; This is a safe terminal eval that still uses real raylib data shapes:
   ;; Vector2 is a fixed array type and Rectangle is an ordinary struct.
   (let [point (rl.Vector2 [20.0 20.0])
-        rect (rl.Rectangle {x: 10.0 y: 10.0 width: 40.0 height: 40.0})]
+        rect (rl.Rectangle :x 10.0 :y 10.0 :width 40.0 :height 40.0)]
     (rl.CheckCollisionPointRec point rect)))
 
 (defn draw-demo-window []

@@ -6,34 +6,34 @@
 
 (import runtime "base:runtime")
 
-(defstruct User {
+(defstruct User [
   name: string
   age: int
-})
+])
 
-(defstruct State {
+(defstruct State [
   mode: keyword
   values: []int
   fixed: [3]int
   buffer: [dynamic]int
   lookup: map[string]int
   states: map[keyword]int
-})
+])
 
 (defn user-name [] -> string
-  (let [user (User {name: "Ada" age: 36})]
+  (let [user (User :name "Ada" :age 36)]
     user.name))
 
 (defn state-mode [] -> keyword
   (let [buffer (arr.dynamic int [21 34]) :defer
         lookup (map.of string int {"one" 1 "two" 2}) :defer
         states {:state/ready 1 :state/done 2} :defer
-        state (State {mode: :env/dev
-                      values: [1 2 3]
-                      fixed: [5 8 13]
-                      buffer: buffer
-                      lookup: lookup
-                      states: states})]
+        state (State :mode :env/dev
+                      :values [1 2 3]
+                      :fixed [5 8 13]
+                      :buffer buffer
+                      :lookup lookup
+                      :states states)]
     state.mode))
 
 (defn dynamic-first [] -> int

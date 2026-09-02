@@ -8,16 +8,16 @@
 (import str "kvist:str")
 (import soa "kvist:soa")
 
-(defstruct Profile {
+(defstruct Profile [
   name: string
   age: int
-})
+])
 
-(defstruct Member {
+(defstruct Member [
   name: string
   score: int
   active: bool
-})
+])
 
 (defn inc-value [x: int] -> int
   (+ x 1))
@@ -71,7 +71,7 @@
         lookup (map.of int int {1 10 2 20}) :defer
         mapped-thread (arr.map inc-value xs) :defer
         threaded (arr.filter even-value? mapped-thread)
-        profile (Profile {name: "Ada" age: 10})
+        profile (Profile :name "Ada" :age 10)
         updated-profile profile
         bucket "unset"
         when-let-result 0
@@ -210,9 +210,9 @@
       (t.is (= (get cycled 3) 2)))))
 
 (t.deftest arr-package-field-selector-surface
-  (let [members (arr.dynamic Member [(Member {name: "Ada" score: 10 active: true})
-                                     (Member {name: "Lin" score: 20 active: false})
-                                     (Member {name: "Ada" score: 30 active: true})]) :defer
+  (let [members (arr.dynamic Member [(Member :name "Ada" :score 10 :active true)
+                                     (Member :name "Lin" :score 20 :active false)
+                                     (Member :name "Ada" :score 30 :active true)]) :defer
         names (arr.map .name (slice members 0)) :defer
         active (arr.filter .active (slice members 0)) :defer
         inactive (arr.remove .active (slice members 0)) :defer

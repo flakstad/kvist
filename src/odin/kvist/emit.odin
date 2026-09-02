@@ -85,6 +85,17 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return fmt.tprintf("%s{{}}", type_text), {}, true
     }
 
+    if head.text == "zero-of" {
+        if len(form.items) != 2 {
+            return "", Compile_Error{message = "zero-of expects one value", span = form.span}, false
+        }
+        value, err_value, ok_value := emit_expr(e, form.items[1])
+        if !ok_value {
+            return "", err_value, false
+        }
+        return fmt.tprintf("type_of(%s){{}}", value), {}, true
+    }
+
     if !kvist_package_imported(e, "data") &&
        (strings.has_prefix(head.text, "data.") ||
         strings.has_prefix(head.text, "data/")) {
@@ -486,6 +497,78 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return fmt.tprintf("new(%s, %s)", type_text, allocator), {}, true
     }
 
+    {
+        constructor_head_name := map_name(head.text)
+        defer delete(constructor_head_name)
+        constructor_args := form.items[1:]
+        if struct_decl, ok_struct := find_struct_decl(e, constructor_head_name); ok_struct {
+            if len(constructor_args) == 0 {
+                return "", Compile_Error{
+                    message = fmt.tprintf("%s zero-value construction uses (zero %s) or (%s [])", head.text, head.text, head.text),
+                    span = form.span,
+                }, false
+            }
+            if len(constructor_args) == 1 && constructor_args[0].kind == .Brace {
+                return "", Compile_Error{
+                    message = fmt.tprintf("%s receives a map as one value; construct the struct with positional values, alternating :field value pairs, or one vector aggregate", head.text),
+                    span = constructor_args[0].span,
+                }, false
+            }
+            if len(constructor_args) == 1 && constructor_args[0].kind == .Vector {
+                return emit_struct_positional_literal(e, struct_decl, constructor_args[0].items[:], form.span)
+            }
+            if struct_args_use_named_fields(constructor_args) {
+                return emit_struct_named_literal(e, struct_decl, constructor_args, form.span)
+            }
+            return emit_struct_positional_literal(e, struct_decl, constructor_args, form.span)
+        }
+        if union_decl, ok_union := find_union_decl(e, constructor_head_name); ok_union {
+            if len(constructor_args) == 1 && constructor_args[0].kind == .Brace {
+                return "", Compile_Error{
+                    message = fmt.tprintf("%s receives a map as one value; construct the union with one value or one :variant value pair", head.text),
+                    span = constructor_args[0].span,
+                }, false
+            }
+            if len(constructor_args) == 2 && constructor_args[0].kind == .Keyword {
+                return emit_union_named_constructor(e, union_decl, constructor_args, form.span)
+            }
+            if len(constructor_args) == 1 {
+                return emit_union_positional_constructor(e, union_decl, constructor_args[0])
+            }
+            return "", Compile_Error{message = fmt.tprintf("%s union construction expects one value or one :variant value pair", head.text), span = form.span}, false
+        }
+        imported_type_candidate := !strings.has_prefix(constructor_head_name, "^") &&
+                                   ((len(constructor_head_name) > 0 &&
+                                    constructor_head_name[0] >= 'A' &&
+                                    constructor_head_name[0] <= 'Z') ||
+                                   dotted_head_member_starts_upper(constructor_head_name))
+        if imported_type_candidate {
+            imported_fields, ok_imported_type := imported_odin_type_fields(e, constructor_head_name)
+            if ok_imported_type {
+                defer delete_struct_field_slice(&imported_fields)
+                if len(constructor_args) == 0 {
+                    return "", Compile_Error{
+                        message = fmt.tprintf("%s zero-value construction uses (zero %s) or (%s [])", head.text, head.text, head.text),
+                        span = form.span,
+                    }, false
+                }
+                if len(constructor_args) == 1 && constructor_args[0].kind == .Brace {
+                    return "", Compile_Error{
+                        message = fmt.tprintf("%s receives a map as one value; construct the struct with positional values, alternating :field value pairs, or one vector aggregate", head.text),
+                        span = constructor_args[0].span,
+                    }, false
+                }
+                if len(constructor_args) == 1 && constructor_args[0].kind == .Vector {
+                    return emit_imported_struct_positional_literal(e, constructor_head_name, imported_fields[:], constructor_args[0].items[:], form.span)
+                }
+                if imported_struct_args_use_named_fields(constructor_args) {
+                    return emit_imported_struct_named_literal(e, constructor_head_name, imported_fields[:], constructor_args, form.span)
+                }
+                return emit_imported_struct_positional_literal(e, constructor_head_name, imported_fields[:], constructor_args, form.span)
+            }
+        }
+    }
+
     if len(form.items) == 2 && form.items[1].kind == .Vector {
         if head.text == "quaternion" {
             return emit_quaternion_vector_constructor(e, form.items[1])
@@ -505,16 +588,6 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
                 return text, err_literal, ok_literal
             }
         } else {
-            imported_fields, ok_imported_type := imported_odin_type_fields(e, head_name)
-            if ok_imported_type {
-                defer delete_struct_field_slice(&imported_fields)
-                type_text, err_type, ok_type := parse_type_text(head)
-                if !ok_type {
-                    return "", err_type, false
-                }
-                text, err_literal, ok_literal, _ := emit_typed_literal_value(e, head, type_text, form.items[1])
-                return text, err_literal, ok_literal
-            }
             if _, ok_expected := imported_odin_proc_arg_type(e, head_name, 0); !ok_expected {
                 type_text, err_type, ok_type := parse_type_text(head)
                 if !ok_type {
@@ -541,53 +614,32 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
 
     if len(form.items) == 2 && form.items[1].kind == .Brace && !call_head_is_overload(e, head) {
         head_name := map_name(head.text)
-        struct_decl, ok_struct := find_struct_decl(e, head_name)
-        if ok_struct {
-            err_struct, ok_struct_ctor := validate_struct_constructor(e, struct_decl, form.items[1])
-            if !ok_struct_ctor {
-                return "", err_struct, false
-            }
-            return emit_struct_brace_literal(e, struct_decl, form.items[1])
-        }
-        union_decl, ok_union := find_union_decl(e, head_name)
-        if ok_union {
-            return emit_union_constructor(e, union_decl, form.items[1])
-        }
-        imported_fields, ok_imported := imported_odin_type_fields(e, head_name)
-        if ok_imported {
-            defer delete_struct_field_slice(&imported_fields)
-            return emit_imported_struct_brace_literal(e, head_name, imported_fields[:], form.items[1])
-        }
         if type_text_is_map(head_name) {
             mark_dynamic_literals(e)
             return emit_brace_literal(e, head_name, form.items[1])
         }
-        if dotted_head_member_starts_upper(head_name) {
-            return emit_brace_literal(e, head_name, form.items[1])
+        if head_name == "Data" {
+            value_text, _, err_value, ok_value := emit_contextual_data_value(e, form.items[1])
+            return value_text, err_value, ok_value
         }
-        if !strings.contains(head_name, ".") {
-            if call_name, proc_decl, ok_proc := resolve_proc_call_decl(e, head.text); ok_proc {
-                named_arg_texts, err_named, ok_named := emit_named_call_with_defaults(e, proc_decl, form.items[1])
-                if !ok_named {
-                    return "", err_named, false
-                }
-                return emit_call_text(call_name, named_arg_texts[:]), {}, true
-            }
-        }
-        named_arg_texts, err_named, ok_named := emit_named_call_arg_texts(e, form.items[1])
-        if ok_named {
-            return emit_call_text(head_name, named_arg_texts[:]), {}, true
-        }
-        if err_named.message != "" && err_named.message != "named arguments expect field: labels" {
-            return "", err_named, false
-        }
-        return emit_brace_literal(e, head_name, form.items[1])
     }
 
     arg_texts: [dynamic]string
     head_name := map_name(head.text)
-    if !strings.contains(head_name, ".") {
+    if !strings.contains(head_name, ".") || first_keyword_arg_tail_start(form.items[1:]) >= 0 {
         if call_name, proc_decl, ok_proc := resolve_proc_call_decl(e, head.text); ok_proc {
+            call_args := form.items[1:]
+            resolution := keyword_args_call_resolution(e, proc_decl, call_args)
+            if resolution.mode == .Named {
+                arg_texts_with_named, err_args, ok_args := emit_mixed_call_with_defaults(e, proc_decl, call_args[:resolution.split], call_args[resolution.split:], form.span)
+                if !ok_args {
+                    return "", err_args, false
+                }
+                return emit_call_text(call_name, arg_texts_with_named[:]), {}, true
+            }
+            if resolution.mode == .Ambiguous {
+                return "", ambiguous_keyword_args_call_error(form.items[resolution.split+1].span), false
+            }
             specialized_call, handled_specialized, err_specialized, ok_specialized := emit_specialized_proc_call_if_needed(e, call_name, proc_decl, form.items[1:], form.span)
             if handled_specialized {
                 if !ok_specialized {
@@ -595,32 +647,11 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
                 }
                 return specialized_call, {}, true
             }
-            if len(form.items) >= 3 &&
-               form.items[len(form.items)-1].kind == .Brace &&
-               form_is_named_arg_brace(form.items[len(form.items)-1]) {
-                arg_texts_with_mixed, err_args, ok_args := emit_mixed_call_with_defaults(e, proc_decl, form.items[1:len(form.items)-1], form.items[len(form.items)-1], form.span)
-                if !ok_args {
-                    return "", err_args, false
-                }
-                return emit_call_text(call_name, arg_texts_with_mixed[:]), {}, true
-            }
             arg_texts_with_defaults, err_args, ok_args := emit_positional_call_with_defaults(e, proc_decl, form.items[1:], form.span)
             if !ok_args {
                 return "", err_args, false
             }
             return emit_call_text(call_name, arg_texts_with_defaults[:]), {}, true
-        }
-    }
-    if len(form.items) != 2 {
-        if _, ok_struct := find_struct_decl(e, head_name); ok_struct {
-            return "", Compile_Error{
-                message = fmt.tprintf(
-                    "struct construction expects one brace or vector aggregate; use (%s {{field: value ...}}) or (%s [value ...])",
-                    head.text,
-                    head.text,
-                ),
-                span    = form.span,
-            }, false
         }
     }
     if len(form.items) == 2 && symbol_head_needs_type_conversion_parens(head.text) {
@@ -639,16 +670,13 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     if ok_generic_ctor || err_generic_ctor.message != "" {
         return generic_ctor, err_generic_ctor, ok_generic_ctor
     }
-    if len(form.items) >= 3 &&
-       form.items[len(form.items)-1].kind == .Brace &&
-       form_is_named_arg_brace(form.items[len(form.items)-1]) {
-        arg_texts_with_mixed, err_mixed, ok_mixed := emit_general_mixed_call_arg_texts(e, head_name, form.items[1:len(form.items)-1], form.items[len(form.items)-1])
+    general_args := form.items[1:]
+    if named_start := first_keyword_arg_tail_start(general_args); named_start >= 0 {
+        arg_texts_with_mixed, err_mixed, ok_mixed := emit_general_mixed_call_arg_texts(e, head_name, general_args[:named_start], general_args[named_start:], form.span)
         if ok_mixed {
             return emit_call_text(head_name, arg_texts_with_mixed[:]), {}, true
         }
-        if err_mixed.message != "" && err_mixed.message != "named arguments expect field: labels" {
-            return "", err_mixed, false
-        }
+        return "", err_mixed, false
     }
     for arg, arg_idx in form.items[1:] {
         arg_text := ""
@@ -672,8 +700,8 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
 }
 
 emit_type_application_expr :: proc(e: ^Emitter, type_form: CST_Form, args: []CST_Form, span: Span) -> (string, Compile_Error, bool) {
-    if len(args) != 1 {
-        return "", Compile_Error{message = "type application expects exactly one value", span = span}, false
+    if len(args) == 0 {
+        return "", Compile_Error{message = "type application expects at least one value", span = span}, false
     }
 
     type_text, err_type, ok_type := parse_type_text(type_form)
@@ -681,6 +709,28 @@ emit_type_application_expr :: proc(e: ^Emitter, type_form: CST_Form, args: []CST
         return "", err_type, false
     }
     mark_keyword_type_for_text(e, type_text)
+
+    if keyword_arg_tail_is_syntax(args, 0) {
+        named_values, err_named, ok_named := emit_named_call_arg_texts(e, args, span)
+        if !ok_named {
+            return "", err_named, false
+        }
+        inner := emit_vector_items_text(named_values[:])
+        return surround_with_braces(type_text, inner), {}, true
+    }
+
+    if len(args) > 1 {
+        values: [dynamic]string
+        for arg in args {
+            value_text, err_value, ok_value := emit_expr(e, arg)
+            if !ok_value {
+                return "", err_value, false
+            }
+            append(&values, value_text)
+        }
+        inner := emit_vector_items_text(values[:])
+        return surround_with_braces(type_text, inner), {}, true
+    }
 
     value := args[0]
     if text, err_literal, ok_literal, handled := emit_typed_literal_value(e, type_form, type_text, value); handled {
@@ -745,6 +795,12 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
     case .Nil:
         return form.text, {}, true
     case .Symbol:
+        if len(form.text) > 1 && form.text[len(form.text)-1] == ':' {
+            return "", Compile_Error{
+                message = "suffix `:` is reserved for type annotations; use a prefix keyword such as :name for data",
+                span = form.span,
+            }, false
+        }
         if dot := strings.index(form.text, "."); dot > 0 && dot+1 < len(form.text) {
             root := map_name(form.text[:dot])
             if _, local := lookup_local_type(e, root); !local {

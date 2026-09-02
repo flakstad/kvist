@@ -6,17 +6,17 @@
   Transact
 ])
 
-(defstruct Endpoint {
+(defstruct Endpoint [
   host-id: i64
   display-name: string :default "unnamed"
-})
+])
 
-(defstruct Message {
+(defstruct Message [
   mode: Mode
   endpoint: Endpoint
   retries: i64 :default 0
   replicas: [dynamic]Endpoint :default []
-})
+])
 
 (defn main []
   (let [message: Data

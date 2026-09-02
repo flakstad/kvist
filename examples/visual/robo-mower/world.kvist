@@ -22,10 +22,10 @@
 (def Dock-Cell-Y: int (+ Boundary-Y 3))
 
 (defstruct World
-  {cells: [dynamic]int
+  [cells: [dynamic]int
    cut: [dynamic]bool
    obstacle-count: int
-   boundary-count: int})
+   boundary-count: int])
 
 (defn idx
   "Convert grid coordinates to a flat cell index."
@@ -60,10 +60,10 @@
 (defn make-world
   "Allocate the mutable world buffers and seed the default field."
   [] -> World
-  (let [world (World {cells: (make-int-buffer Cell-Outside)
-                      cut: (make-bool-buffer false)
-                      obstacle-count: 0
-                      boundary-count: 0})]
+  (let [world (World :cells (make-int-buffer Cell-Outside)
+                      :cut (make-bool-buffer false)
+                      :obstacle-count 0
+                      :boundary-count 0)]
     (reset-world! (addr world))
     world))
 

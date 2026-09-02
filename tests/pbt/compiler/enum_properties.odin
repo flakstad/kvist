@@ -125,17 +125,17 @@ write_compiler_enum_expression :: proc(
 	case 5:
 		stats.struct_field += 1
 		priority := pbt.draw(t, pbt.int_range(-8, 8))
-		strings.write_string(builder, "(pbt-job-score (Pbt-Job {phase: ")
+		strings.write_string(builder, "(pbt-job-score (Pbt-Job :phase ")
 		write_compiler_phase_selector(builder, phase, false)
-		fmt.sbprintf(builder, " priority: %d}))", priority)
+		fmt.sbprintf(builder, " :priority %d))", priority)
 		return code * 31 + priority
 	case 6:
 		stats.assoc += 1
 		priority := pbt.draw(t, pbt.int_range(-8, 8))
 		other := pbt.draw(t, pbt.int_range(0, len(COMPILER_PHASE_NAMES) - 1))
-		strings.write_string(builder, "(let [original (Pbt-Job {phase: ")
+		strings.write_string(builder, "(let [original (Pbt-Job :phase ")
 		write_compiler_phase_selector(builder, phase, false)
-		fmt.sbprintf(builder, " priority: %d}) newer (assoc original.phase ", priority)
+		fmt.sbprintf(builder, " :priority %d) newer (assoc original.phase ", priority)
 		write_compiler_phase_selector(builder, other, false)
 		strings.write_string(builder, ")] (+ (* (pbt-job-score original) 7) (pbt-job-score newer)))")
 		return (code * 31 + priority) * 7 + COMPILER_PHASE_CODES[other] * 31 + priority
@@ -143,9 +143,9 @@ write_compiler_enum_expression :: proc(
 		stats.mutation += 1
 		priority := pbt.draw(t, pbt.int_range(-8, 8))
 		other := pbt.draw(t, pbt.int_range(0, len(COMPILER_PHASE_NAMES) - 1))
-		strings.write_string(builder, "(let [job (Pbt-Job {phase: ")
+		strings.write_string(builder, "(let [job (Pbt-Job :phase ")
 		write_compiler_phase_selector(builder, phase, false)
-		fmt.sbprintf(builder, " priority: %d})] (set! job.phase ", priority)
+		fmt.sbprintf(builder, " :priority %d)] (set! job.phase ", priority)
 		write_compiler_phase_selector(builder, other, false)
 		strings.write_string(builder, ") (pbt-job-score job))")
 		return COMPILER_PHASE_CODES[other] * 31 + priority

@@ -2,16 +2,16 @@
 (package main)
 (import core "kvist:core")
 
-(defstruct Profile {
+(defstruct Profile [
   name: string
   visits: int
-})
+])
 
-(defstruct User {
+(defstruct User [
   profile: Profile
   age: int
   active?: bool
-})
+])
 
 (defn birthday [user: User] -> User
   (update user.age inc))
@@ -29,7 +29,7 @@
     (assoc .active? false)))
 
 (defn score [] -> int
-  (let [ada (User {profile: (Profile {name: "Ada" visits: 1}) age: 36 active?: true})
+  (let [ada (User :profile (Profile :name "Ada" :visits 1) :age 36 :active? true)
         older (birthday ada)
         visited (visit older)
         named (rename visited "Ada Lovelace")

@@ -40,13 +40,13 @@ compile_nested_owned_argument_transfer_does_not_delete_temporary :: proc(t: ^tes
 (import arr "kvist:arr")
 
 (defstruct Node
-  {values: [dynamic]int})
+  [values: [dynamic]int])
 
 (defn inc [value: int] -> int
   (+ value 1))
 
 (defn node [values: [dynamic]int] -> Node
-  (Node {values: values}))
+  (Node :values values))
 
 (defn add-node! [node-value: Node] -> int
   1)
@@ -90,16 +90,16 @@ reject_returning_owned_result_from_with_temp_allocator_through_local_wrapper :: 
     source := `(package main)
 (import runtime "base:runtime")
 
-(defstruct Box {
+(defstruct Box [
   xs: [dynamic]int
-})
+])
 
 (defn inc [x: int] -> int
   (+ x 1))
 
 (defn bad [xs: []int] -> Box
   (with-temp-allocator [allocator]
-    (let [box (Box {xs: (map inc xs)})]
+    (let [box (Box :xs (map inc xs))]
       box)))`
 
     _, err, ok := kvist.compile_source(source)
@@ -113,17 +113,17 @@ reject_returning_owned_result_from_with_temp_allocator_through_set_bang_wrapper 
     source := `(package main)
 (import runtime "base:runtime")
 
-(defstruct Box {
+(defstruct Box [
   xs: [dynamic]int
-})
+])
 
 (defn inc [x: int] -> int
   (+ x 1))
 
 (defn bad [xs: []int] -> Box
   (with-temp-allocator [allocator]
-    (let [box (Box {xs: ([dynamic]int [])})]
-      (set! box (Box {xs: (map inc xs)}))
+    (let [box (Box :xs ([dynamic]int []))]
+      (set! box (Box :xs (map inc xs)))
       box)))`
 
     _, err, ok := kvist.compile_source(source)
@@ -137,19 +137,19 @@ reject_returning_owned_result_from_with_temp_allocator_in_final_if_points_to_ali
     source := `(package main)
 (import runtime "base:runtime")
 
-(defstruct Box {
+(defstruct Box [
   xs: [dynamic]int
-})
+])
 
 (defn inc [x: int] -> int
   (+ x 1))
 
 (defn bad [xs: []int flag: bool] -> Box
   (with-temp-allocator [allocator]
-    (let [box (Box {xs: (map inc xs)})]
+    (let [box (Box :xs (map inc xs))]
       (if flag
         box
-        (Box {xs: ([dynamic]int [])})))))`
+        (Box :xs ([dynamic]int []))))))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -232,16 +232,16 @@ reject_returning_wrapped_owned_result_from_with_temp_allocator :: proc(t: ^testi
     source := `(package main)
 (import runtime "base:runtime")
 
-(defstruct Box {
+(defstruct Box [
   xs: [dynamic]int
-})
+])
 
 (defn inc [x: int] -> int
   (+ x 1))
 
 (defn bad [xs: []int] -> Box
   (with-temp-allocator [allocator]
-    (Box {xs: (arr.map inc xs)})))`
+    (Box :xs (arr.map inc xs))))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -254,15 +254,15 @@ compile_transfers_owned_result_into_composite_literal :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")
 
-(defstruct Batch {
+(defstruct Batch [
   values: [dynamic]int
-})
+])
 
 (defn inc [x: int] -> int
   (+ x 1))
 
 (defn make-batch [xs: []int] -> Batch
-  (Batch {values: (arr.map inc xs)}))`
+  (Batch :values (arr.map inc xs)))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -278,15 +278,15 @@ compile_transfers_owned_result_through_composite_wrapper :: proc(t: ^testing.T) 
     source := `(package main)
 (import arr "kvist:arr")
 
-(defstruct Batch {
+(defstruct Batch [
   values: [dynamic]int
-})
+])
 
 (defn inc [x: int] -> int
   (+ x 1))
 
 (defn wrap [values: [dynamic]int] -> Batch
-  (Batch {values: values}))
+  (Batch :values values))
 
 (defn make-batch [xs: []int] -> Batch
   (wrap (arr.map inc xs)))`
@@ -469,13 +469,13 @@ compile_does_not_warn_for_owned_local_transferred_into_final_composite :: proc(t
     source := `(package main)
 (import arr "kvist:arr")
 
-(defstruct Box {
+(defstruct Box [
   xs: [dynamic]int
-})
+])
 
 (defn demo [] -> Box
   (let [xs (arr.empty int)]
-    (Box {xs: xs})))`
+    (Box :xs xs)))`
 
     result, err, ok := kvist.compile_source_with_map(source)
     testing.expect_value(t, ok, true)
@@ -495,19 +495,19 @@ compile_does_not_warn_for_owned_local_transferred_into_later_composite_binding :
     source := `(package main)
 (import arr "kvist:arr")
 
-(defstruct Box {
+(defstruct Box [
   xs: [dynamic]int
-})
+])
 
 (defn demo [] -> int
   (let [xs (arr.empty int)
-        box (Box {xs: xs})]
+        box (Box :xs xs)]
     (defer (delete box.xs))
     (count box.xs)))
 
 (defn managed-alias [] -> int
   (let [xs (arr.empty int) :defer
-        box (Box {xs: xs})]
+        box (Box :xs xs)]
     (arr.push! xs 1)
     (count box.xs)))`
 
@@ -529,13 +529,13 @@ compile_does_not_warn_for_owned_local_transferred_into_returned_composite :: pro
     source := `(package main)
 (import arr "kvist:arr")
 
-(defstruct Box {
+(defstruct Box [
   xs: [dynamic]int
-})
+])
 
 (defn demo [] -> Box
   (let [xs (arr.empty int)]
-    (return (Box {xs: xs}))))`
+    (return (Box :xs xs))))`
 
     result, err, ok := kvist.compile_source_with_map(source)
     testing.expect_value(t, ok, true)
@@ -610,18 +610,18 @@ compile_warns_for_owned_local_used_after_deleted_in_all_type_case_branches :: pr
     source := `(package main)
 (import arr "kvist:arr")
 
-(defstruct Connected {
+(defstruct Connected [
   id: int
-})
+])
 
-(defstruct Disconnected {
+(defstruct Disconnected [
   reason: string
-})
+])
 
-(defunion Event {
+(defunion Event [
   connected: Connected
   disconnected: Disconnected
-})
+])
 
 (defn demo [event: Event]
   (let [xs (arr.empty int)]

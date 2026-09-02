@@ -823,9 +823,9 @@ compile_source_with_top_level_macro_dsl :: proc(t: ^testing.T) {
         (defstruct (unquote name) (unquote fields)))
       (quasiquote
         (defn (unquote make-name) [] -> (unquote name)
-          ((unquote name) {}))))))
+          ((unquote name) []))))))
 
-(defentity Point {x: float y: float})
+(defentity Point [x: float y: float])
 
 (defn point-origin? [point: Point] -> bool
   (and (= point.x 0.0)
@@ -854,11 +854,12 @@ compile_source_with_recursive_macro_dsl :: proc(t: ^testing.T) {
     (forms)
     (let [tag (first variants)
           value-type (nth variants 1)
-          ctor-name (symbol (str "make-" (name union-name) "-" (name tag)))]
+          ctor-name (symbol (str "make-" (name union-name) "-" (name tag)))
+          field-key (keyword (name tag))]
       (forms
         (quasiquote
           (defn (unquote ctor-name) [value: (unquote value-type)] -> (unquote union-name)
-            ((unquote union-name) {(unquote tag) value})))
+            ((unquote union-name) (unquote field-key) value)))
         (emit-union-ctors union-name (rest (rest variants)))))))
 
 (defmacro defunion+ctors [name variants]
@@ -867,11 +868,11 @@ compile_source_with_recursive_macro_dsl :: proc(t: ^testing.T) {
       (defunion (unquote name) (unquote variants)))
     (emit-union-ctors name variants)))
 
-(defunion+ctors Value {
+(defunion+ctors Value [
   i: int
   s: string
   ok: bool
-})`
+])`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -920,26 +921,27 @@ compile_source_with_message_family_macro :: proc(t: ^testing.T) {
     (let [entry (first entries)
           struct-name (nth entry 0)
           ctor-name (symbol (str "make-" (name union-name) "-" (name struct-name)))
-          tag (symbol (str (name struct-name) ":"))]
+          tag (symbol (str (name struct-name) ":"))
+          field-key (keyword (name struct-name))]
       (forms
         (quasiquote
           (defn (unquote ctor-name) [value: (unquote struct-name)] -> (unquote union-name)
-            ((unquote union-name) {(unquote tag) value})))
+            ((unquote union-name) (unquote field-key) value)))
         (emit-message-ctors union-name (rest entries))))))
 
 (defmacro defmessages [union-name entries]
   (forms
     (emit-message-structs entries)
     (quasiquote
-      (defunion (unquote union-name) {
+      (defunion (unquote union-name) [
         (splice (emit-message-union-entries entries))
-      }))
+      ]))
     (emit-message-ctors union-name entries)))
 
 (defmessages Event [
-  [Connected {id: int}]
-  [Disconnected {id: int reason: string}]
-  [Data {id: int payload: string}]
+  [Connected [id: int]]
+  [Disconnected [id: int reason: string]]
+  [Data [id: int payload: string]]
 ])`
 
     output, err, ok := kvist.compile_source(source)
@@ -992,16 +994,16 @@ compile_soa_convenience_macros :: proc(t: ^testing.T) {
     source := `(package main)
 (import soa "kvist:soa")
 
-(defstruct Particle {
+(defstruct Particle [
   x: f32
   vx: f32
   mass: f32
-})
+])
 
 (defn update-one [] -> f32
   (let [particles (soa.make Particle 2)]
     (defer (delete particles))
-    (soa.push! (addr particles) (Particle {x: 1 vx: 2 mass: 3}))
+    (soa.push! (addr particles) (Particle :x 1 :vx 2 :mass 3))
     (soa.update! particles 0
       .vx (+ vx 10)
       .x (+ x vx))

@@ -550,10 +550,10 @@ compile_source_package_can_use_odin_get_macro :: proc(t: ^testing.T) {
     main_source := `(package main)
 (import support "support")
 
-(defstruct User {
+(defstruct User [
   name: string
   score: int
-})
+])
 
 (defn score [xs: []int, m: map[string]int, user: User] -> int
   (+ (support.at xs 1)
@@ -831,14 +831,14 @@ compile_source_package_can_use_copy_with_macro :: proc(t: ^testing.T) {
     main_source := `(package main)
 (import support "support")
 
-(defstruct Profile {
+(defstruct Profile [
   name: string
-})
+])
 
-(defstruct User {
+(defstruct User [
   profile: Profile
   active?: bool
-})
+])
 
 (defn rename [user: User] -> User
   (let [renamed (support.replacing user.profile.name "Ada")]
@@ -943,14 +943,14 @@ compile_source_package_can_use_copy_update_macro :: proc(t: ^testing.T) {
     main_source := `(package main)
 (import support "support")
 
-(defstruct Profile {
+(defstruct Profile [
   visits: int
-})
+])
 
-(defstruct User {
+(defstruct User [
   profile: Profile
   score: int
-})
+])
 
 (defn add [x: int delta: int] -> int
   (+ x delta))
@@ -1241,10 +1241,10 @@ compile_source_package_macro_can_expand_to_private_defiter :: proc(t: ^testing.T
     defer delete(pkg_path)
     pkg_source := `(package support)
 
-(defstruct- Num-Source {
+(defstruct- Num-Source [
   current: int
   end: int
-})
+])
 
 (defn- next-num [src: ^Num-Source] -> [value: int ok: bool]
   (if (< src.current src.end)
@@ -1255,7 +1255,7 @@ compile_source_package_macro_can_expand_to_private_defiter :: proc(t: ^testing.T
 
 (defiter- nums-impl [end: int] -> Num-Source :yield int
   :next next-num
-  (Num-Source {current: 0 end: end}))
+  (Num-Source :current 0 :end end))
 
 (defmacro nums [end]
   (quasiquote

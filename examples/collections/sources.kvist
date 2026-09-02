@@ -2,13 +2,13 @@
 (package main)
 (import core "kvist:core")
 
-(defstruct File_Source {
+(defstruct File_Source [
   items: []string
   index: int
-})
+])
 
 (defn open-files [items: []string] -> File_Source
-  (File_Source {items: items index: 0}))
+  (File_Source :items items :index 0))
 
 (defn next-file [src: ^File_Source] -> [path: string ok: bool]
   (if (< src.index (count src.items))

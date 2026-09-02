@@ -12,10 +12,10 @@
 (def Overhead-Tasks: int 200)
 (def Detach-Tasks: int 200)
 
-(defstruct Work-Item {
+(defstruct Work-Item [
   index: int
   seed: int
-})
+])
 
 (defn elapsed-us [start: time.Time] -> f64
   (time.duration_microseconds (time.since start)))
@@ -60,10 +60,10 @@
       total)))
 
 (defn parallel-for-four [] -> int
-  (let [jobs ([]Work-Item [(Work-Item {index: 0 seed: 1})
-                           (Work-Item {index: 1 seed: 2})
-                           (Work-Item {index: 2 seed: 3})
-                           (Work-Item {index: 3 seed: 4})])
+  (let [jobs ([]Work-Item [(Work-Item :index 0 :seed 1)
+                           (Work-Item :index 1 :seed 2)
+                           (Work-Item :index 2 :seed 3)
+                           (Work-Item :index 3 :seed 4)])
         results (make [dynamic]int 4)]
     (defer (delete results))
     (p.for (fn [job: Work-Item]
