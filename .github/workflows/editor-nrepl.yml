@@ -18,6 +18,7 @@ jobs:
       - uses: laytan/setup-odin@v2.12.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          release: dev-2026-08
 
       - uses: actions/setup-node@v4
         with:
@@ -37,6 +38,7 @@ jobs:
       - uses: laytan/setup-odin@v2.12.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          release: dev-2026-08
 
       - name: Install Emacs
         run: |
@@ -57,6 +59,7 @@ jobs:
       - uses: laytan/setup-odin@v2.12.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          release: dev-2026-08
 
       - uses: rhysd/action-setup-vim@v1
         with:
