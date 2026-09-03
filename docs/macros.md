@@ -77,7 +77,7 @@ multiple forms with `forms`:
     (forms
       `(defstruct ~name ~fields)
       `(defn ~make-name [] -> ~name
-         (~name [])))))
+         (~name)))))
 ```
 
 `concat` also returns a sequence of forms by concatenating evaluated form

@@ -70,7 +70,7 @@
                   decoded (str.unescape raw) :defer
                   value (data.from-string decoded)]
               (inc! reader.index)
-              (return value (Read-Error []) true))
+              (return value (Read-Error) true))
           :else (inc! reader.index))))
     (read-error reader "unterminated string")))
 
@@ -95,23 +95,23 @@
     (let [token (core.slice reader.text start reader.index)]
       (cond
         (= token "") (read-error reader "expected EDN value")
-        (= token "nil") (return 'nil (Read-Error []) true)
-        (= token "true") (return 'true (Read-Error []) true)
-        (= token "false") (return 'false (Read-Error []) true)
+        (= token "nil") (return 'nil (Read-Error) true)
+        (= token "true") (return 'true (Read-Error) true)
+        (= token "false") (return 'false (Read-Error) true)
         (= (core.get token 0) (byte 58))
-          (return (data.from-keyword token) (Read-Error []) true)
+          (return (data.from-keyword token) (Read-Error) true)
         (or (str.contains? token ".")
             (str.contains? token "e")
             (str.contains? token "E"))
           (let [[number number-ok] (strconv.parse_f64 token)]
             (if number-ok
-              (return (data.from-float number) (Read-Error []) true)
-              (return (data.from-symbol token) (Read-Error []) true)))
+              (return (data.from-float number) (Read-Error) true)
+              (return (data.from-symbol token) (Read-Error) true)))
         :else
           (let [[number number-ok] (strconv.parse-int token)]
             (if (and (decimal-token? token) number-ok)
-              (return (data.from-int (i64 number)) (Read-Error []) true)
-              (return (data.from-symbol token) (Read-Error []) true)))))))
+              (return (data.from-int (i64 number)) (Read-Error) true)
+              (return (data.from-symbol token) (Read-Error) true)))))))
 
 (defn- release-items! [items: [dynamic]Data]
   (for [item items]
@@ -133,7 +133,7 @@
         (return (read-error reader "unterminated collection")))
       (when (= (core.get reader.text reader.index) close)
         (inc! reader.index)
-        (return (sequence-data initial items[:]) (Read-Error []) true))
+        (return (sequence-data initial items[:]) (Read-Error) true))
       (let [[item error ok] (parse-value reader)]
         (when (not ok)
           (return 'nil error false))
@@ -150,7 +150,7 @@
       (when (= (core.get reader.text reader.index) (byte 125))
         (inc! reader.index)
         (return (data.map-from-owned-unique! (addr items))
-                (Read-Error [])
+                (Read-Error)
                 true))
       (let [key-start reader.index
             [key key-error key-ok] (parse-value reader)
@@ -211,7 +211,7 @@
                   (let [[tagged-value tagged-error tagged-ok] (parse-value reader)]
                     (if (not tagged-ok)
                       (return 'nil tagged-error false))
-                    (return (data.tagged tag tagged-value) (Read-Error []) true))))))
+                    (return (data.tagged tag tagged-value) (Read-Error) true))))))
         (or (= ch (byte 41)) (= ch (byte 93)) (= ch (byte 125)))
           (read-error reader "unexpected closing delimiter")
         :else (parse-token reader)))))
@@ -226,7 +226,7 @@
     (skip-space! (addr reader))
     (if (!= reader.index (core.count text))
       (read-error (addr reader) "trailing EDN input")
-      (return parsed (Read-Error []) true))))
+      (return parsed (Read-Error) true))))
 
 (defn read
   "Parse one complete EDN value, asserting when the input is malformed."

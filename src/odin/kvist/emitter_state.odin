@@ -115,6 +115,8 @@ Emitter_Import_Cache :: struct {
     proc_params_known: map[string]bool,
     type_fields: map[string][dynamic]Struct_Field,
     type_fields_known: map[string]bool,
+    type_vector_alias: map[string]bool,
+    type_vector_alias_known: map[string]bool,
     enum_exists: map[string]bool,
     enum_known: map[string]bool,
 }
@@ -131,6 +133,12 @@ emitter_import_cache_init :: proc(cache: ^Emitter_Import_Cache) {
     }
     if cache.type_fields_known == nil {
         cache.type_fields_known = make(map[string]bool)
+    }
+    if cache.type_vector_alias == nil {
+        cache.type_vector_alias = make(map[string]bool)
+    }
+    if cache.type_vector_alias_known == nil {
+        cache.type_vector_alias_known = make(map[string]bool)
     }
     if cache.enum_exists == nil {
         cache.enum_exists = make(map[string]bool)
@@ -154,6 +162,8 @@ emitter_import_cache_delete :: proc(cache: ^Emitter_Import_Cache) {
     delete(cache.proc_params_known)
     delete(cache.type_fields)
     delete(cache.type_fields_known)
+    delete(cache.type_vector_alias)
+    delete(cache.type_vector_alias_known)
     delete(cache.enum_exists)
     delete(cache.enum_known)
     cache^ = {}

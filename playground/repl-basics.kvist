@@ -147,7 +147,7 @@
   ])
 
   (defn lesson-user [] -> Lesson-User
-    (Lesson-User ["Ada" "ada@example.test"]))
+    (Lesson-User "Ada" "ada@example.test"))
 
   ;; Evaluate this normally first so the Lesson-User value becomes *1.
   (lesson-user)

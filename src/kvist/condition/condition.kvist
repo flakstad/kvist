@@ -43,7 +43,7 @@
   [index: int, kind: string, message: string, data: Data,
    restart-flags: u32] -> Decision
   (let [handler (Handler (runtime.handler-at index))
-        handler-result (handler (Condition [kind message data]))]
+        handler-result (handler (Condition kind message data))]
     (if handler-result.handled
       (let [flag (restart-flag handler-result.restart)]
         (do
@@ -78,7 +78,7 @@
   (runtime.unhandled kind message))
 
 (defn- decision [restart: string, value: string] -> Decision
-  (Decision [true restart value]))
+  (Decision true restart value))
 
 (defn decline
   "Decline to handle a condition so the next dynamically enclosing handler,

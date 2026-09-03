@@ -277,7 +277,7 @@ emit_vector_literal :: proc(e: ^Emitter, prefix: string, form: CST_Form) -> (str
 emit_brace_literal :: proc(e: ^Emitter, prefix: string, form: CST_Form) -> (string, Compile_Error, bool) {
     keyword_fields := !type_text_is_map(prefix)
     if prefix != "" && keyword_fields && !brace_form_starts_with_field_label(form) {
-        return "", Compile_Error{message = "positional aggregate literals use vector syntax", span = form.span}, false
+        return "", Compile_Error{message = "aggregate literals use vector syntax", span = form.span}, false
     }
 
     expected_key_type := ""
@@ -317,9 +317,13 @@ emit_brace_literal :: proc(e: ^Emitter, prefix: string, form: CST_Form) -> (stri
 }
 
 emit_struct_field_value_text :: proc(e: ^Emitter, field: Struct_Field, value: CST_Form) -> (string, Compile_Error, bool) {
-    if (value.kind == .String || value.kind == .Regex || value.kind == .Bool || value.kind == .Number) &&
-       type_text_is_builtin_odin_scalar(field.ty) &&
-       !form_obviously_matches_expected_type(e, value, field.ty) {
+    expected_type := resolved_zero_type_text(e, field.ty)
+    literal_for_scalar := value.kind == .String || value.kind == .Regex || value.kind == .Bool ||
+                          value.kind == .Number || value.kind == .Vector || value.kind == .Brace ||
+                          value.kind == .Set
+    if literal_for_scalar &&
+       type_text_is_builtin_odin_scalar(expected_type) &&
+       !form_obviously_matches_expected_type(e, value, expected_type) {
         source_name := field.source_name
         if source_name == "" {
             source_name = field.name
@@ -496,7 +500,8 @@ emit_struct_positional_literal :: proc(e: ^Emitter, struct_decl: ^Struct_Decl, v
         }
         append(&pairs, Brace_Pair{key = field.name, value = default_text})
     }
-    return emit_struct_pairs_literal(struct_decl.name, pairs[:], false), {}, true
+    include_field_names := len(pairs) < len(struct_decl.fields)
+    return emit_struct_pairs_literal(struct_decl.name, pairs[:], include_field_names), {}, true
 }
 
 emit_imported_struct_named_literal :: proc(e: ^Emitter, type_text: string, fields: []Struct_Field, named_args: []CST_Form, span: Span) -> (string, Compile_Error, bool) {
@@ -551,7 +556,8 @@ emit_imported_struct_positional_literal :: proc(e: ^Emitter, type_text: string, 
         }
         append(&pairs, Brace_Pair{key = field.name, value = value_text})
     }
-    return emit_struct_pairs_literal(type_text, pairs[:], false), {}, true
+    include_field_names := len(pairs) < len(fields)
+    return emit_struct_pairs_literal(type_text, pairs[:], include_field_names), {}, true
 }
 
 emit_call_text :: proc(name: string, arg_texts: []string) -> string {
@@ -737,9 +743,6 @@ call_arg_expected_type :: proc(e: ^Emitter, call: CST_Form, item_index: int) -> 
                 }
             }
             return "", false
-        }
-        if len(args) == 1 && args[0].kind == .Vector {
-            return strings.clone(head_name), true
         }
         if arg_index < len(struct_decl.fields) {
             return strings.clone(struct_decl.fields[arg_index].ty), true

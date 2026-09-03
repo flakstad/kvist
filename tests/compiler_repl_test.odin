@@ -2403,7 +2403,7 @@ compile_runtime_type_and_data_conversion_surface :: proc(t: ^testing.T) {
         {"(type (Data 123))", "kvist_data_type(kvist_type_value)"},
         {"(type Greeting)", `keyword("typeid")`},
         {"(type int)", `keyword("typeid")`},
-        {`(type (Greeting ["hello"]))`, `return keyword("Greeting")`},
+        {`(type (Greeting "hello"))`, `return keyword("Greeting")`},
         {`(type (fn [x: int] -> int (+ x 1)))`, `return keyword("proc(int) -> int")`},
         {"(Data [])", "kvist_data_make_items"},
         {"(Data {:answer 9})", "kvist_data_make_map"},

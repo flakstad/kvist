@@ -82,7 +82,7 @@
 (defn rect
   "Construct a raylib rectangle."
   [x: f32, y: f32, w: f32, h: f32] -> rl.Rectangle
-  (rl.Rectangle [x y w h]))
+  (rl.Rectangle x y w h))
 
 (defn rgba
   "Construct a raylib color from integer channel values."
@@ -184,7 +184,7 @@
   (let [state (App-State :world (make-world)
                           :belief (make-belief)
                           :robot (make-robot)
-                          :sensors (Sensors [])
+                          :sensors (Sensors)
                           :paused false
                           :sim-speed 1.0
                           :sim-credit 0.0

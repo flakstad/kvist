@@ -209,7 +209,7 @@
 (defn draw-hud
   "Draw the translucent overlay containing frame, simulation, and control data."
   [font: rl.Font, state: ^App-State]
-  (let [panel (rl.Rectangle [8 8 (f32 (- (rl.GetScreenWidth) 16)) 110])]
+  (let [panel (rl.Rectangle 8 8 (f32 (- (rl.GetScreenWidth) 16)) 110)]
     (rl.DrawRectangleRounded panel 0.08 8 [0 0 0 190])
     (rl.DrawRectangleRoundedLines panel 0.08 8 [255 255 255 45])
     (draw-hud-text font "backend" 18 20 Hud-Font-Size rl.LIGHTGRAY)

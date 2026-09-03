@@ -78,7 +78,7 @@ language_entry_doc :: proc(entry: Language_Source_Entry) -> string {
     case "defvar", "defvar-":
         return "Define mutable package state. A top-level defvar is exported; defvar- is package-private. Use set!, mut!, or the unary mutation forms to update it.\n\nExample:\n  (defvar requests: int 0)"
     case "defstruct", "defstruct-":
-        return "Define a nominal struct with typed fields in declaration order. defstruct- keeps the type private to its source package. Construct values positionally, with order-independent keyword/value pairs, or with one positional vector.\n\nExample:\n  (defstruct User [name: string age: int])\n  (User :age 36 :name \"Ada\")"
+        return "Define a nominal struct with typed fields in declaration order. defstruct- keeps the type private to its source package. Construct values positionally or with order-independent keyword/value pairs.\n\nExample:\n  (defstruct User [name: string age: int])\n  (User :age 36 :name \"Ada\")"
     case "defenum", "defenum-":
         return "Define a nominal enum. Members may be listed in a vector or assigned explicit values in a keyword map; defenum- is package-private.\n\nExample:\n  (defenum Status [Ready Running Done])"
     case "defunion", "defunion-":

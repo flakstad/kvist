@@ -169,9 +169,6 @@ composite_literal_transfers_owned_name :: proc(e: ^Emitter, form: CST_Form, name
         return false
     }
     args := form.items[1:]
-    if len(args) == 1 && args[0].kind == .Vector {
-        return composite_value_transfers_owned_name(e, args[0], name)
-    }
     if keyword_arg_tail_is_syntax(args, 0) {
         for i := 1; i < len(args); i += 2 {
             if composite_value_transfers_owned_name(e, args[i], name) {
@@ -409,9 +406,6 @@ borrowed_escape_owner_name :: proc(e: ^Emitter, form: CST_Form, borrowed: []Borr
     }
     if form_is_struct_or_union_constructor(e, form) {
         args := form.items[1:]
-        if len(args) == 1 && args[0].kind == .Vector {
-            return borrowed_escape_owner_name(e, args[0], borrowed, live)
-        }
         if keyword_arg_tail_is_syntax(args, 0) {
             for i := 1; i < len(args); i += 2 {
                 if owner, ok := borrowed_escape_owner_name(e, args[i], borrowed, live); ok {

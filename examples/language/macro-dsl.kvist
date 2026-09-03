@@ -5,7 +5,7 @@
     (forms
       `(defstruct ~name ~fields)
       `(defn ~make-name [] -> ~name
-         (~name [])))))
+         (~name)))))
 
 (defentity Point [x: float y: float])
 

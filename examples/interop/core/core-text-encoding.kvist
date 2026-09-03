@@ -50,7 +50,7 @@
   ;; sha2 uses an explicit context, update, and final call. hex.encode then
   ;; allocates the printable digest bytes, which this proc deletes locally.
   (let [text "kvist"
-        ctx (sha2.Context_256 [])
+        ctx (sha2.Context_256)
         digest ([32]byte [])]
     (sha2.init_256 (addr ctx))
     (sha2.update (addr ctx) (transmute []byte text))

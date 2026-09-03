@@ -55,7 +55,7 @@
 (defstruct Level [platforms: [dynamic]rl.Vector2])
 
 (defn platform-collider [pos: rl.Vector2] -> rl.Rectangle
-  (rl.Rectangle [pos.x pos.y PlatformWidth PlatformHeight]))
+  (rl.Rectangle pos.x pos.y PlatformWidth PlatformHeight))
 
 (comment
   (platform-collider (rl.Vector2 [10 20]))
@@ -123,7 +123,7 @@
       (mut! player-pos += (* player-vel dt))
       (set! player-grounded? false)
 
-      (defvar player-feet-collider (rl.Rectangle [(- player-pos.x 4) (- player-pos.y 4) 8 4]))
+      (defvar player-feet-collider (rl.Rectangle (- player-pos.x 4) (- player-pos.y 4) 8 4))
       (for [platform level.platforms]
         (when (and (rl.CheckCollisionRecs player-feet-collider (platform-collider platform))
                    (> player-vel.y 0))

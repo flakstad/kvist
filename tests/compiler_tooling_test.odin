@@ -1276,7 +1276,7 @@ cli_reload_command_discovers_sibling_reload_adapter :: proc(t: ^testing.T) {
   (mut! state^.ticks += 1))
 
 (defn main []
-  (let [state (App_State [])]
+  (let [state (App_State)]
     (init &state)
     (tick &state)))`
     main_write_err := os.write_entire_file_from_string(main_path, main_source)

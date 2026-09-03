@@ -119,7 +119,7 @@
 (defn make-robot
   "Create a robot at the default pose."
   [] -> Robot
-  (let [robot (Robot [])]
+  (let [robot (Robot)]
     (reset-robot! (addr robot))
     robot))
 

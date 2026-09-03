@@ -76,7 +76,7 @@
 (defn main
   "Starts the production application entrypoint."
   []
-  (let [state (App_State [])]
+  (let [state (App_State)]
     (init &state)
     (on-load &state false)
     (run &state)))

@@ -30,7 +30,7 @@
       (forms
         `(defstruct ~name ~fields)
         `(defn ~make-name [] -> ~name
-           (~name []))))
+           (~name))))
     (error "defentity expects a field vector")))
 
 (defentity User [name: string age: int])

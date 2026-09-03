@@ -443,6 +443,48 @@ odin_import_type_fields_from_dir :: proc(alias, dir, type_name: string) -> (fiel
     return fields, false
 }
 
+odin_import_type_is_vector_alias_from_dir :: proc(alias, dir, type_name: string) -> bool {
+    if !os.exists(dir) {
+        return false
+    }
+    entries, err := os.read_directory_by_path(dir, -1, context.allocator)
+    if err != nil {
+        return false
+    }
+    defer os.file_info_slice_delete(entries, context.allocator)
+
+    for entry in entries {
+        if entry.type != .Regular || !strings.has_suffix(entry.name, ".odin") {
+            continue
+        }
+        path, join_err := os.join_path({dir, entry.name}, context.allocator)
+        if join_err != nil {
+            continue
+        }
+        data, read_err := os.read_entire_file_from_path(path, context.allocator)
+        delete(path)
+        if read_err != nil {
+            continue
+        }
+        source := string(data)
+        lines := strings.split_lines(source, context.allocator)
+        for line in lines {
+            rhs, ok_decl := odin_decl_rhs_from_line(line, type_name)
+            if !ok_decl {
+                continue
+            }
+            vector_fields, ok_vector := odin_vector_alias_fields(alias, rhs)
+            delete_struct_field_slice(&vector_fields)
+            delete(lines)
+            delete(data)
+            return ok_vector
+        }
+        delete(lines)
+        delete(data)
+    }
+    return false
+}
+
 odin_import_enum_exists_from_dir :: proc(dir, type_name: string) -> bool {
     if !os.exists(dir) {
         return false
@@ -675,6 +717,40 @@ imported_odin_type_fields :: proc(e: ^Emitter, type_text: string) -> (fields: [d
         e.import_cache.type_fields[cache_key] = clone_struct_field_slice(fields[:])
     }
     return fields, ok
+}
+
+imported_odin_type_is_vector_alias :: proc(e: ^Emitter, type_text: string) -> bool {
+    alias, member, ok_parts := imported_odin_type_parts(type_text)
+    if !ok_parts {
+        return false
+    }
+    ensure_emitter_indexes(e)
+    raw, found_import := e.odin_import_paths[alias]
+    if !found_import {
+        return false
+    }
+    cache_key := emitter_import_cache_key(e, type_text, raw, alias, member)
+    if e.import_cache != nil && e.import_cache.type_vector_alias_known[cache_key] {
+        return e.import_cache.type_vector_alias[cache_key]
+    }
+    if e.import_cache != nil {
+        e.import_cache.type_vector_alias_known[cache_key] = true
+    }
+    odin_root, ok_root := emitter_odin_root(e)
+    if !ok_root {
+        return false
+    }
+    defer if e.import_cache == nil { delete(odin_root) }
+    dir, ok_dir := odin_import_dir(odin_root, raw)
+    if !ok_dir {
+        return false
+    }
+    defer delete(dir)
+    is_vector_alias := odin_import_type_is_vector_alias_from_dir(alias, dir, member)
+    if e.import_cache != nil {
+        e.import_cache.type_vector_alias[cache_key] = is_vector_alias
+    }
+    return is_vector_alias
 }
 
 imported_odin_enum_type_exists :: proc(e: ^Emitter, type_text: string) -> bool {

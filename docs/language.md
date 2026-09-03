@@ -85,8 +85,7 @@ bit.and-not bit.test bit.set bit.clear bit.flip
 Kvist uses Clojure-style reader syntax:
 
 - `(head args...)` for calls and language forms
-- `[...]` for bindings, parameters, positional aggregates, and collection
-  literals
+- `[...]` for bindings, parameters, and collection literals
 - `{...}` for map-shaped literals; keyword keys use prefix syntax such as
   `{:name "Ada"}`
 - `#{...}` for set literals
@@ -586,23 +585,20 @@ Structs group named fields into one concrete value:
 Struct values are copied by value unless passed through a pointer.
 Omitted fields in a struct literal use Odin zero values.
 
-Structs have three constructor forms:
+Structs have positional and named constructor forms:
 
 ```clojure
 (User "Ada" 36)                  ; positional fields
 (User :age 36 :name "Ada")      ; named fields
-(User ["Ada" 36])                ; positional aggregate
 ```
 
-Direct positional values and values in the aggregate vector follow declaration
-order. The named form is an alternating sequence of keyword and value pairs.
-Named fields are matched by name, so their order does not matter. Duplicate and
-unknown field names are rejected.
+Positional values follow declaration order. The named form is an alternating
+sequence of keyword and value pairs. Named fields are matched by name, so their
+order does not matter. Duplicate and unknown field names are rejected.
 
-An alternating keyword/value sequence always selects the named form. When a
-struct's positional fields themselves contain keywords, use the aggregate
-vector to make positional intent explicit, for example `(Job [:job/queued
-"thumbnail"])`.
+An alternating keyword/value sequence always selects the named form. Use
+`(keyword :job/queued)` when a keyword literal in that position would be
+ambiguous with named arguments, just as with ordinary function calls.
 
 A map is never interpreted as named struct arguments. `(User {:name "Ada"})`
 passes one map value to `User` and is rejected because `User` does not have one
@@ -615,9 +611,11 @@ explicit constructor, while brace elements remain maps.
 ([]User [(User :age 36 :name "Ada")])
 ```
 
-Use `(zero User)` for an explicit zero value or `(User [])` for the empty
-positional aggregate. A bare `(User)` call is rejected so zero construction is
-never confused with an ordinary zero-argument procedure call.
+An empty `(User)` call constructs the struct with its field defaults, using Odin
+zero values for fields without `:default`. Call heads are resolved first, so
+`(User)` remains an ordinary zero-argument procedure call when `User` names a
+procedure instead of a struct. Use `(zero User)` when you explicitly want the
+raw struct zero value without evaluating declared field defaults.
 
 Field metadata accepts ordinary type spelling, including compact Odin-like type
 tokens:
@@ -688,7 +686,7 @@ default:
   label: string :default "local"
 ])
 
-(Settings [])
+(Settings)
 ```
 
 Defaults are evaluated when an omitted field is constructed. At a decoded
@@ -811,7 +809,7 @@ Typed declarations use `name: Type`:
 
 ```clojure
 (def default-port: int 8080)
-(defvar current-state: State (State []))
+(defvar current-state: State (State))
 ```
 
 An uninitialized typed `defvar` starts with the type's zero value:
@@ -1374,18 +1372,21 @@ that type.
 (quaternion [0.0 0.0 0.0 1.0])
 ```
 
-Struct values can be constructed from direct positional values, alternating
-named fields, or one positional aggregate vector:
+Struct values can be constructed from direct positional values or alternating
+named fields:
 
 ```clojure
 (rl.Vector2 10.0 20.0)
 (rl.Rectangle :height 1 :x 0 :width 1 :y 0)
-(rl.Vector2 [10.0 20.0])
 ```
 
-Direct values and vector elements follow declaration order. Alternating named
-fields are matched by name and may appear in any order. A map literal is always
-one value; it is not a struct constructor form.
+Direct values follow declaration order. Alternating named fields are matched by
+name and may appear in any order. Vector and map literals are ordinary single
+argument values, as they are in function calls.
+
+Imported fixed-array aliases retain ordinary typed-literal syntax such as
+`(rl.Vector2 [10.0 20.0])`; the vector is the value being constructed, not a
+list of struct arguments.
 
 Inline collection literals are also available for the most common owned
 containers:
@@ -1541,8 +1542,7 @@ often the clearest choice when you want to build a collection incrementally with
 calls.
 
 There is no separate object-construction runtime. Struct construction is type
-call syntax with direct positional values, alternating named fields, or one
-positional aggregate vector.
+call syntax with direct positional values or alternating named fields.
 
 ## Bindings, Blocks, And Local Flow
 

@@ -726,7 +726,7 @@ compile_validates_struct_field_default_types :: proc(t: ^testing.T) {
 ])
 
 (defn config [] -> Config
-  (Config []))`
+  (Config))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -945,40 +945,13 @@ compile_rejects_removed_layout_and_default_spellings :: proc(t: ^testing.T) {
 }
 
 @(test)
-compile_rejects_map_as_struct_constructor :: proc(t: ^testing.T) {
+compile_struct_constructor_treats_map_as_one_positional_value :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct User [name: string])
+(defstruct Lookup [entries: map[string]int])
 
-(defn bad [] -> User
-  (User {:name "Ada"}))`
-
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    if ok {
-        return
-    }
-    defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "receives a map as one value"), true)
-}
-
-@(test)
-compile_struct_constructor_supports_positional_named_and_vector_forms :: proc(t: ^testing.T) {
-    source := `(package main)
-
-(defstruct Greet [
-  firstname: string
-  lastname: string
-])
-
-(defn positional [] -> Greet
-  (Greet "hello" "there"))
-
-(defn named [] -> Greet
-  (Greet :lastname "there" :firstname "hello"))
-
-(defn from-vector [] -> Greet
-  (Greet ["hello" "there"]))`
+(defn lookup [] -> Lookup
+  (Lookup {"answer" 42}))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -988,20 +961,75 @@ compile_struct_constructor_supports_positional_named_and_vector_forms :: proc(t:
     }
     defer delete(output)
 
-    expected_positional := `return Greet{"hello", "there"}`
-    expected_named := `return Greet{lastname = "there", firstname = "hello"}`
-    testing.expect_value(t, strings.count(output, expected_positional), 2)
-    testing.expect_value(t, strings.count(output, expected_named), 1)
+    testing.expect_value(t, strings.contains(output, `return Lookup{map[string]int{"answer" = 42}}`), true)
 }
 
 @(test)
-compile_struct_constructor_rejects_empty_call :: proc(t: ^testing.T) {
+compile_struct_constructor_supports_positional_named_and_omitted_fields :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defstruct Marker [])
+(defstruct Greet [
+  firstname: string
+  lastname: string
+  excited?: bool
+])
 
-(defn marker [] -> Marker
-  (Marker))`
+(defn positional [] -> Greet
+  (Greet "hello" "there"))
+
+(defn partial [] -> Greet
+  (Greet "hello"))
+
+(defn named [] -> Greet
+  (Greet :lastname "there" :firstname "hello"))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected_positional := `return Greet{firstname = "hello", lastname = "there"}`
+    expected_partial := `return Greet{firstname = "hello"}`
+    expected_named := `return Greet{lastname = "there", firstname = "hello"}`
+    testing.expect_value(t, strings.contains(output, expected_positional), true)
+    testing.expect_value(t, strings.contains(output, expected_partial), true)
+    testing.expect_value(t, strings.contains(output, expected_named), true)
+}
+
+@(test)
+compile_struct_constructor_treats_vector_as_one_positional_value :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Names [
+  values: [2]string
+  count: int
+])
+
+(defn names [] -> Names
+  (Names ["Ada" "Linus"]))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `return Names{values = [2]string{"Ada", "Linus"}}`), true)
+}
+
+@(test)
+compile_struct_constructor_rejects_vector_for_scalar_field :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct User [name: string active?: bool])
+
+(defn user [] -> User
+  (User ["Ada"]))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -1009,7 +1037,41 @@ compile_struct_constructor_rejects_empty_call :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "zero-value construction uses (zero Marker) or (Marker [])"), true)
+    testing.expect_value(t, strings.contains(err.message, "struct constructor literal type mismatch for :name"), true)
+}
+
+@(test)
+compile_struct_constructor_supports_empty_call_and_preserves_explicit_zero :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Settings [
+  enabled?: bool :default true
+  retries: int
+])
+
+(defn Answer [] -> int
+  42)
+
+(defn defaults [] -> Settings
+  (Settings))
+
+(defn raw-zero [] -> Settings
+  (zero Settings))
+
+(defn ordinary-zero-arg-call [] -> int
+  (Answer))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `return Settings{enabled_p = true}`), true)
+    testing.expect_value(t, strings.contains(output, `return Settings{}`), true)
+    testing.expect_value(t, strings.contains(output, `return Answer()`), true)
 }
 
 @(test)
@@ -1425,7 +1487,7 @@ reject_case_type_pattern_shape :: proc(t: ^testing.T) {
 
 (defn event-score [event: Event] -> int
   (case event
-    (Connected []) 1
+    (Connected) 1
     0))`
 
     _, err, ok := kvist.compile_source(source)
@@ -1862,7 +1924,7 @@ compile_typed_odin_aggregate_positional_vector_literal :: proc(t: ^testing.T) {
 (import rl "vendor:raylib")
 
 (defn platform-collider [pos: rl.Vector2] -> rl.Rectangle
-  (rl.Rectangle [pos.x pos.y 96 16]))`
+  (rl.Rectangle pos.x pos.y 96 16))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -1884,12 +1946,15 @@ platform_collider :: proc(pos: rl.Vector2) -> rl.Rectangle {
 }
 
 @(test)
-compile_accepts_imported_struct_positional_arguments :: proc(t: ^testing.T) {
+compile_imported_struct_positional_arguments_allow_omitted_fields :: proc(t: ^testing.T) {
     source := `(package main)
 (import rl "vendor:raylib")
 
-(defn bad [] -> rl.Vector2
-  (rl.Vector2 0 0))`
+(defn complete [] -> rl.Rectangle
+  (rl.Rectangle 0 0 10 20))
+
+(defn partial [] -> rl.Rectangle
+  (rl.Rectangle 1))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -1898,7 +1963,8 @@ compile_accepts_imported_struct_positional_arguments :: proc(t: ^testing.T) {
         return
     }
     defer delete(output)
-    testing.expect_value(t, strings.contains(output, "return rl.Vector2{0, 0}"), true)
+    testing.expect_value(t, strings.contains(output, "return rl.Rectangle{0, 0, 10, 20}"), true)
+    testing.expect_value(t, strings.contains(output, "return rl.Rectangle{x = 1}"), true)
 }
 
 @(test)

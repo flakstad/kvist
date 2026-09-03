@@ -823,7 +823,7 @@ compile_source_with_top_level_macro_dsl :: proc(t: ^testing.T) {
         (defstruct (unquote name) (unquote fields)))
       (quasiquote
         (defn (unquote make-name) [] -> (unquote name)
-          ((unquote name) []))))))
+          ((unquote name)))))))
 
 (defentity Point [x: float y: float])
 

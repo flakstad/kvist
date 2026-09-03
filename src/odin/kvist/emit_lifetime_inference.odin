@@ -1442,9 +1442,6 @@ owned_result_usage_error :: proc(form: CST_Form, allow_root_owned: bool, e: ^Emi
        form.items[0].kind == .Symbol {
         if form_is_struct_or_union_constructor(e, form) {
             constructor_args := form.items[1:]
-            if len(constructor_args) == 1 && constructor_args[0].kind == .Vector {
-                constructor_args = constructor_args[0].items[:]
-            }
             named_constructor := keyword_arg_tail_is_syntax(constructor_args, 0)
             for arg, arg_index in constructor_args {
                 if named_constructor && arg_index%2 == 0 {

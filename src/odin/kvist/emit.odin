@@ -502,21 +502,6 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         defer delete(constructor_head_name)
         constructor_args := form.items[1:]
         if struct_decl, ok_struct := find_struct_decl(e, constructor_head_name); ok_struct {
-            if len(constructor_args) == 0 {
-                return "", Compile_Error{
-                    message = fmt.tprintf("%s zero-value construction uses (zero %s) or (%s [])", head.text, head.text, head.text),
-                    span = form.span,
-                }, false
-            }
-            if len(constructor_args) == 1 && constructor_args[0].kind == .Brace {
-                return "", Compile_Error{
-                    message = fmt.tprintf("%s receives a map as one value; construct the struct with positional values, alternating :field value pairs, or one vector aggregate", head.text),
-                    span = constructor_args[0].span,
-                }, false
-            }
-            if len(constructor_args) == 1 && constructor_args[0].kind == .Vector {
-                return emit_struct_positional_literal(e, struct_decl, constructor_args[0].items[:], form.span)
-            }
             if struct_args_use_named_fields(constructor_args) {
                 return emit_struct_named_literal(e, struct_decl, constructor_args, form.span)
             }
@@ -543,24 +528,13 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
                                     constructor_head_name[0] <= 'Z') ||
                                    dotted_head_member_starts_upper(constructor_head_name))
         if imported_type_candidate {
+            if len(constructor_args) == 1 && constructor_args[0].kind == .Vector &&
+               imported_odin_type_is_vector_alias(e, constructor_head_name) {
+                return emit_type_application_expr(e, head, constructor_args, form.span)
+            }
             imported_fields, ok_imported_type := imported_odin_type_fields(e, constructor_head_name)
             if ok_imported_type {
                 defer delete_struct_field_slice(&imported_fields)
-                if len(constructor_args) == 0 {
-                    return "", Compile_Error{
-                        message = fmt.tprintf("%s zero-value construction uses (zero %s) or (%s [])", head.text, head.text, head.text),
-                        span = form.span,
-                    }, false
-                }
-                if len(constructor_args) == 1 && constructor_args[0].kind == .Brace {
-                    return "", Compile_Error{
-                        message = fmt.tprintf("%s receives a map as one value; construct the struct with positional values, alternating :field value pairs, or one vector aggregate", head.text),
-                        span = constructor_args[0].span,
-                    }, false
-                }
-                if len(constructor_args) == 1 && constructor_args[0].kind == .Vector {
-                    return emit_imported_struct_positional_literal(e, constructor_head_name, imported_fields[:], constructor_args[0].items[:], form.span)
-                }
                 if imported_struct_args_use_named_fields(constructor_args) {
                     return emit_imported_struct_named_literal(e, constructor_head_name, imported_fields[:], constructor_args, form.span)
                 }
