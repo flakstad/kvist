@@ -9017,7 +9017,9 @@ cli_repl_attach_proxies_olive_capabilities :: proc(t: ^testing.T) {
             console_cli_run,
         )
     replacement_started := false
-    for _ in 0..<4000 {
+    // The client may issue many sequential attached requests. Keep polling
+    // beyond the 30-second per-request console timeout under a slow CI load.
+    for _ in 0..<12000 {
         _ = olive_reload.console_poll(&host)
         if host.console_reload_requested && !replacement_started {
             replacement_started = true
