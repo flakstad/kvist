@@ -492,8 +492,13 @@ A slice is a pointer plus a length: a cheap, non-owning view over contiguous
 elements. Its type is `[]T`, where `T` is the element type:
 
 ```clojure
-([]int [1 2 3])
+([]int [1 2 3])       ; explicit []int slice literal
+(slice [1 2 3])       ; inferred []int slice view
 ```
+
+When the target is an inline vector literal, `slice` infers its element type,
+so `(slice [(User :age 36 :name "Ada")])` produces a `[]User` view without
+repeating the type. The slice remains non-owning.
 
 Indexing reads one element. Slicing creates another view:
 

@@ -84,6 +84,9 @@
       (set! total (+ total x)))
     total))
 
+(defn inline-slice-sum [] -> int
+  (sum (slice [1 2 3 4 5 6])))
+
 (defn lookup-method [name: string] -> [method: Method, ok: bool]
   (cond
     (= name "GET") (return .Get true)
@@ -150,6 +153,9 @@
   ;; => 5
 
   (sum [1 2 3 4 5 6])
+  ;; => 21
+
+  (inline-slice-sum)
   ;; => 21
 
   (method-score "HEAD")
