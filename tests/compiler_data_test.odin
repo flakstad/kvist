@@ -8,6 +8,42 @@ import "core:sync"
 import "core:testing"
 import kvist "../src/odin/kvist"
 
+data_present_lookups_are_released :: proc(output: string) -> bool {
+    marker := " := kvist_data_get_present("
+    offset := 0
+    found := false
+    for offset < len(output) {
+        relative := strings.index(output[offset:], marker)
+        if relative < 0 {
+            break
+        }
+        marker_start := offset + relative
+        line_start := strings.last_index(output[:marker_start], "\n") + 1
+        line_end_relative := strings.index(output[line_start:], "\n")
+        if line_end_relative < 0 {
+            return false
+        }
+        line := output[line_start:line_start+line_end_relative]
+        comma := strings.index(line, ",")
+        if comma <= 0 {
+            return false
+        }
+        child := strings.trim_space(line[:comma])
+        next_start := line_start + line_end_relative + 1
+        next_end_relative := strings.index(output[next_start:], "\n")
+        if next_end_relative < 0 {
+            next_end_relative = len(output) - next_start
+        }
+        next_line := output[next_start:next_start+next_end_relative]
+        if !strings.contains(next_line, fmt.tprintf("defer kvist_data_release(%s)", child)) {
+            return false
+        }
+        found = true
+        offset = next_start
+    }
+    return found
+}
+
 @(test)
 compile_defstruct_rejects_bad_metadata :: proc(t: ^testing.T) {
     source := `(package main)
@@ -128,7 +164,7 @@ compile_data_let_destructuring :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "kvist_data_get_present"), true)
+    testing.expect_value(t, data_present_lookups_are_released(output), true)
     testing.expect_value(t, strings.contains(output, "\":person/email\""), true)
     testing.expect_value(t, strings.contains(output, "\"external-id\""), true)
     testing.expect_value(t, strings.contains(output, "kind = .Symbol"), true)
@@ -328,7 +364,7 @@ compile_data_destructuring_for :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "Data for source must be nil, list, vector, or set"), true)
     testing.expect_value(t, strings.contains(output, ".payload.items {"), true)
     testing.expect_value(t, strings.contains(output, "kvist_data_nth_or_nil"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_data_get_present"), true)
+    testing.expect_value(t, data_present_lookups_are_released(output), true)
     testing.expect_value(t, strings.contains(output, ", index in"), true)
 }
 

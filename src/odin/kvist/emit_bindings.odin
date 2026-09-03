@@ -454,6 +454,7 @@ emit_data_pattern_bindings :: proc(e: ^Emitter, pattern: CST_Form, source: strin
                     child := thread_temp_name(e)
                     present := thread_temp_name(e)
                     emit_line(e, fmt.tprintf("%s, %s := kvist_data_get_present(%s, %s)", child, present, source, key_temp))
+                    emit_line(e, fmt.tprintf("defer kvist_data_release(%s)", child))
                     local_name := map_name(local_form.text)
                     if default_form, has_default := data_pattern_default_for_name(pattern, local_name); has_default {
                         owned_child := thread_temp_name(e)
@@ -492,6 +493,7 @@ emit_data_pattern_bindings :: proc(e: ^Emitter, pattern: CST_Form, source: strin
             child := thread_temp_name(e)
             present := thread_temp_name(e)
             emit_line(e, fmt.tprintf("%s, %s := kvist_data_get_present(%s, %s)", child, present, source, key_temp))
+            emit_line(e, fmt.tprintf("defer kvist_data_release(%s)", child))
             if key_form.kind == .Symbol {
                 local_name := map_name(key_form.text)
                 if default_form, has_default := data_pattern_default_for_name(pattern, local_name); has_default {
